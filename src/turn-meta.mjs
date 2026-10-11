@@ -4,41 +4,43 @@
 // Host-logic file: must never import anything from pi. Zero dependencies.
 import { randomBytes } from 'node:crypto';
 
+// One id per host session (per extension lifetime). The real pi session id is
+// injected after construction (SSOT: pi's SessionManager), this random one is
+// only the fallback for hosts without a pi session manager.
 export class TurnMeta {
   constructor() {
-    // One id per host session (per extension lifetime).
     this.sessionId = `pi-${process.pid}-${randomBytes(4).toString('hex')}`;
-    this.runId = null; // null until the first agent run begins
-    this._runSeq = 0;
+    this.turnId = null; // null until the first agent run begins
+    this._turnSeq = 0;
+  }
+
+  setSessionId(sessionId) {
+    this.sessionId = sessionId;
   }
 
   // A new run begins: every cell in it carries this fresh id.
   beginRun() {
-    this._runSeq += 1;
-    this.runId = `${this.sessionId}-run-${this._runSeq}-${randomBytes(3).toString('hex')}`;
-    return this.runId;
+    this._turnSeq += 1;
+    this.turnId = `${this.sessionId}-turn-${this._turnSeq}-${randomBytes(3).toString('hex')}`;
+    return this.turnId;
   }
 
-  // The run has ended (settled or aborted). Escape usually does not carry pi's
-  // turn id, and our run id is our own; the live run must end regardless, so
-  // fall back to it when no id arrives. After returning, `runId` is null and
-  // `runActive` is false — the "no active agent run" gate uses that, while
-  // the host still uses the stopped id to refuse later cells from the run.
-  endRun(settledTurnId) {
-    const run =
-      settledTurnId && settledTurnId === this.runId
-        ? settledTurnId
-        : this.runId;
-    this.runId = null;
-    return run;
+  // The run has ended (settled or aborted). A hook event on the runtime side
+  // is the Stop/Interrupt Codex maps to turn_ended; the live run id is the
+  // fallback when none arrives. After returning, `turnId` is null and
+  // `turnActive` is false — the "no active agent run" gate uses that.
+  endRun() {
+    const turnId = this.turnId;
+    this.turnId = null;
+    return turnId;
   }
 
-  get runActive() {
-    return this.runId != null;
+  get turnActive() {
+    return this.turnId != null;
   }
 
   // The Codex-style metadata block every cell carries.
   cellMeta() {
-    return { session_id: this.sessionId, run_id: this.runId };
+    return { session_id: this.sessionId, turn_id: this.turnId };
   }
 }

@@ -16,9 +16,6 @@ export class ComputerUse {
     this.resetNotice = false;
     // True once the host has launched a REPL in this session at least once.
     this.startedBefore = false;
-    // Run id stopped by an abort (physical Escape): further cells in that run
-    // are blocked until the next run begins (TurnMeta regenerates the run id).
-    this._stoppedRunId = null;
   }
 
   get running() {
@@ -27,23 +24,25 @@ export class ComputerUse {
 
   // Run one model cell. `turnMeta` is the run's Codex-style metadata the cell
   // carries; `signal` is pi's AbortSignal, forwarded so the MCP request
-  // cancels promptly on abort.
+  // cancels promptly on abort. A pending reset notice rides along as the
+  // FIRST content block even when the cell fails (review fix 8).
   async runCell(code, { signal, timeoutMs, turnMeta } = {}) {
     await this.noticeIfRelaunched();
-    await this.ensureSky();
-    const r = await this.host.runCell(code, { signal, timeoutMs, turnMeta });
-    if (r?.isError) throw new Error(textOf(r) || 'REPL cell failed');
-    // A pending reset notice rides along as the FIRST text block: the
-    // extension passes content through verbatim, so putting it only in
-    // `text` would drop it from the model's tool result.
-    if (this.resetNotice) {
-      this.resetNotice = false;
-      return {
-        text: `${RESET_NOTICE}\n${textOf(r)}`,
-        content: [{ type: 'text', text: RESET_NOTICE }, ...(r.content ?? [])],
-      };
+    try {
+      await this.ensureSky();
+      const r = await this.host.runCell(code, { signal, timeoutMs, turnMeta });
+      if (r?.isError) throw new Error(textOf(r) || 'REPL cell failed');
+      return withResetNotice(this, { text: textOf(r), content: r.content ?? [] });
+    } catch (err) {
+      // The notice still rides along when the cell errors (fix 8): the model
+      // sees that the state came from a fresh REPL, not the one it knew.
+      if (this.resetNotice) {
+        const message = err instanceof Error ? err.message : String(err);
+        err = new Error(`${RESET_NOTICE}\n${message}`);
+        err.fromReset = true;
+      }
+      throw err;
     }
-    return { text: textOf(r), content: r.content ?? [] };
   }
 
   async ensureSky() {
@@ -109,39 +108,14 @@ nodeRepl.write(JSON.stringify({ id: __win.id, title: __win.title }));
 
   // Tell the runtime the turn has ended (normal or aborted). Codex's own
   // hooks do the same on Stop/Interrupt, and the runtime uses it so a
-  // physical Escape stops computer use for the rest of the agent run. On an
-  // abort (Escape) the run id is marked stopped first so further cells in the
-  // same run refuse to run, then the runtime is notified.
+  // physical Escape stops computer use for the rest of the agent run.
   /**
-   * @param {{ session_id: string, run_id: string }} turnMeta
+   * @param {{ session_id: string, turn_id: string }} turnMeta
    * @param {{ aborted?: boolean }} [opts]
    */
   async endRun(turnMeta, { aborted = false } = {}) {
-    if (aborted) this.stopRun(turnMeta?.run_id);
     if (!this.host.running) return; // no REPL — nothing to signal
     await this.host.turnEnded(turnMeta, { hookEventName: aborted ? 'Interrupt' : 'Stop' });
-  }
-
-  // Mark `runId` stopped: further computer-use cells in that run throw. The
-  // host owns the stop id because the cell-level surface is the host's (the
-  // MCP layer); the next run's fresh id simply no longer matches.
-  stopRun(runId) {
-    this.host.stopRun?.(runId ?? null);
-    return { stopped: runId ?? null };
-  }
-
-  // Throw before a cell runs if this run has been stopped (Escape aborted it).
-  // Delegated to the host so a stubbed MCP layer enforces it too.
-  _assertNotStopped(runId) {
-    this.host._assertNotStopped?.(runId);
-  }
-
-  // Attach a reset notice to a plain-text result (no content blocks to ride
-  // along with). The notice goes at the start of the text.
-  attachResetNotice(text) {
-    if (!this.resetNotice) return text;
-    this.resetNotice = false;
-    return `${RESET_NOTICE}\n${text}`;
   }
 
   async close() {
@@ -150,6 +124,18 @@ nodeRepl.write(JSON.stringify({ id: __win.id, title: __win.title }));
     this.resetNotice = false;
     this.startedBefore = false;
   }
+}
+
+// Serve a pending reset notice on a successful cell result: it rides along as
+// the FIRST content block (the extension passes content through verbatim, so
+// putting it only in `text` would drop it from the model's tool result).
+function withResetNotice(cu, result) {
+  if (!cu.resetNotice) return result;
+  cu.resetNotice = false;
+  return {
+    text: `${RESET_NOTICE}\n${result.text}`,
+    content: [{ type: 'text', text: RESET_NOTICE }, ...result.content],
+  };
 }
 
 function textOf(r) {
