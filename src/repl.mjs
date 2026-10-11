@@ -9,7 +9,7 @@ import { McpClient } from '@earendil-works/pi-mcp';
 import { StdioTransport } from '@earendil-works/pi-mcp';
 
 // The host's MCP request timeout rides above the cell's own timeout so the
-// runtime's own timeout always fires first (review fix 6).
+// runtime's own timeout always fires first.
 const HOST_TIMEOUT_MARGIN_MS = 10_000;
 const RUNTIME_DEFAULT_TIMEOUT_MS = 30_000;
 // turn_ended is a courtesy signal; a short timeout keeps run settle snappy.
@@ -17,7 +17,7 @@ const TURN_ENDED_TIMEOUT_MS = 5_000;
 
 export const RESET_NOTICE = 'Codex REPL state was reset: a new REPL was started.';
 
-// Codex-style turn metadata carried by every cell (review fix 5): the key the
+// Codex-style turn metadata carried by every cell: the key the
 // runtime reads out of tools/call params._meta, arriving as
 // nodeRepl.requestMeta inside the cell.
 export const TURN_META_KEY = 'x-codex-turn-metadata';
@@ -27,7 +27,6 @@ export class ReplHost {
     this.tmpDir = tmpDir ?? path.join(os.tmpdir(), 'pi-codex-repl');
     this.client = null;
     this.transport = null;
-    this.stderr = '';
   }
 
   get running() {
@@ -42,9 +41,12 @@ export class ReplHost {
       throw new Error(`Cannot start Codex REPL: missing ${cfg.missing.join('; ')}`);
     }
     // ADR 0002 launch recipe: the configured environment merged over the
-    // current one, minus the three variables that route through the running
-    // Codex app, plus the analytics-off switch, with temporary directories
-    // pointed at a writable location. Nothing is persisted.
+    // current one, always with no arguments, minus the three variables that
+    // route through the running Codex app, plus the analytics-off switch,
+    // with temporary directories pointed at a writable location. Nothing is
+    // persisted. inheritEnv: false makes this merged, cleaned object the
+    // child's whole environment — StdioTransport would otherwise re-merge
+    // process.env and bring the deleted variables back.
     const env = { ...process.env, ...cfg.env };
     for (const k of ['SKY_CUA_NATIVE_PIPE', 'SKY_CUA_NATIVE_PIPE_DIRECTORY', 'CODEX_CLI_PATH']) {
       delete env[k];
@@ -54,7 +56,7 @@ export class ReplHost {
     env.TMP = this.tmpDir;
     env.TEMP = this.tmpDir;
 
-    const transport = new StdioTransport({ command: cfg.command, args: cfg.args ?? [], env });
+    const transport = new StdioTransport({ command: cfg.command, args: [], env, inheritEnv: false });
     const client = new McpClient({
       name: 'pi-codex-computer-use',
       version: '0.1.0',
@@ -67,7 +69,7 @@ export class ReplHost {
     // connect() starts the transport and runs the initialize handshake. Per
     // the MCP spec initialize cannot be cancelled, so instead of passing the
     // signal down we race the handshake against it and kill the newborn
-    // process tree on abort — aborting the first call returns promptly (fix 2).
+    // process tree on abort — aborting the first call returns promptly.
     try {
       await raceAbort(client.connect(transport), signal);
     } catch (err) {
@@ -91,8 +93,7 @@ export class ReplHost {
   // Run one cell (JavaScript) in the REPL. Returns the MCP result
   // { content: [...], isError } with text/image blocks passed through.
   // Per `turnMeta`, the call carries the run's Codex-style turn metadata in
-  // params._meta; the runtime surfaces it to the cell as nodeRepl.requestMeta
-  // (review fix 5 — no globalThis prefix needed).
+  // params._meta; the runtime surfaces it to the cell as nodeRepl.requestMeta.
   // Per `signal`, pi's AbortSignal cancels the MCP request promptly instead
   // of waiting for the cell to finish.
   async runCell(code, { timeoutMs, signal, turnMeta } = {}) {
@@ -105,7 +106,7 @@ export class ReplHost {
       arguments: arguments_,
       ...(turnMeta ? { _meta: { [TURN_META_KEY]: { session_id: turnMeta.session_id, turn_id: turnMeta.turn_id } } } : {}),
     };
-    // The host never times out earlier than the cell itself (fix 6).
+    // The host never times out earlier than the cell itself.
     return this.client.request('tools/call', params, {
       signal,
       timeoutMs: cellTimeoutMs + HOST_TIMEOUT_MARGIN_MS,
@@ -138,7 +139,6 @@ export class ReplHost {
     const transport = this.transport;
     this.client = null;
     this.transport = null;
-    this.stderr = '';
     if (client) {
       // client.close() tears down in-flight requests and closes the
       // transport, which kills the REPL process tree.
