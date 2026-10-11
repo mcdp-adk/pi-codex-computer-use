@@ -6,6 +6,10 @@ Lets the pi coding agent drive Windows desktop apps by hosting the computer-use 
 
 ### Runtime
 
+**Codex installation**:
+The Codex desktop app's files on the user's machine, found through Codex's configuration; it provides the Codex runtime and the Codex guidance.
+_Avoid_: Codex app (the running program)
+
 **Codex runtime**:
 The computer-use runtime installed with the Codex desktop app on the user's machine: the REPL, sky, and the helper.
 _Avoid_: Codex bundle, cua_node
@@ -26,6 +30,10 @@ _Avoid_: CUA API
 The native process from the Codex runtime that captures windows and sends input to the desktop.
 _Avoid_: driver
 
+**Codex guidance**:
+Codex's own model-facing documents for computer use, read in place from the Codex installation.
+_Avoid_: Codex docs, Codex skill
+
 ### Hosting
 
 **Host**:
@@ -34,7 +42,11 @@ _Avoid_: bridge, adapter, wrapper
 
 **App approval**:
 The runtime's request for consent before it acts on an app; this package always grants it.
-_Avoid_: permission prompt
+_Avoid_: permission prompt, confirmation
+
+**Confirmation**:
+The model asking the user in the conversation, and waiting for an answer, before a risky action such as deleting data or sending a message.
+_Avoid_: approval
 
 **Agent run**:
 One user prompt handled by pi, from the prompt to the agent's final answer; the runtime treats it as one turn.
