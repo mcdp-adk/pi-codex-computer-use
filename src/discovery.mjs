@@ -42,6 +42,8 @@ function nodeModuleRoots(env) {
 }
 
 // The sky API reference sits next to the REPL module, under @oai/sky/docs.
+// The config's NODE_REPL_NODE_MODULE_DIRS points at ONE node_modules dir;
+// the doc lives under @oai/sky/docs in it.
 export function skyReferencePath(env) {
   for (const root of nodeModuleRoots(env ?? {})) {
     const p = path.join(root, SKY_DOC);
@@ -51,15 +53,19 @@ export function skyReferencePath(env) {
 }
 
 // Marketplace source roots recorded in the Codex config (e.g. the bundled
-// marketplace the computer-use plugin ships in).
+// marketplace the computer-use plugin ships in). Codex writes them as
+// `[marketplaces.<id>]` entries with a single-quoted `source = '\\?\<path>'`
+// (a Windows extended-length path prefix). We accept both that prefix and a
+// plain path, quoted with either ' or ".
 function marketplaceRoots() {
   const file = path.join(codexHome(), 'config.toml');
   if (!fs.existsSync(file)) return [];
   const toml = fs.readFileSync(file, 'utf8');
   const roots = [];
-  for (const m of toml.matchAll(/source\s*=\s*'\\\\\?\\([^']+)'/g)) roots.push(m[1]);
-  for (const m of toml.matchAll(/source\s*=\s*'([^']+)'/g)) roots.push(m[1]);
-  return roots.map((r) => r.replace(/^\\\\\?\\/, ''));
+  for (const m of toml.matchAll(/^\s*source\s*=\s*(['"])([^'"]+)\1/gm)) {
+    roots.push(m[2].replace(/^\\\\\?\\/, ''));
+  }
+  return roots;
 }
 
 function findPluginDoc(name) {
