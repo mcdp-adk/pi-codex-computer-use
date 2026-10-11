@@ -238,7 +238,6 @@ describe('issue #3 acceptance: hide the tools when the Codex installation is inc
         // the last line that looks like the meta object.
         const jsonLine = text.split('\n').filter((l) => l.trim().startsWith('{')).pop();
         const meta = jsonLine ? JSON.parse(jsonLine)['x-codex-turn-metadata'] : undefined;
-        console.log('[dbg] text lines:', JSON.stringify(text));
         assert.ok(meta, `cell carried no turn metadata: ${text.slice(0, 200)}`);
         assert.ok(meta.turn_id, 'cell carries a per-run turn id');
         assert.equal(meta.session_id, session.sessionManager.getSessionId(), 'session_id is pi session id');
