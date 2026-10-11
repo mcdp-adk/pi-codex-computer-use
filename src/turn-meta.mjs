@@ -27,16 +27,12 @@ export class TurnMeta {
 
   // The run has ended (settled or aborted). A hook event on the runtime side
   // is the Stop/Interrupt Codex maps to turn_ended; the live run id is the
-  // fallback when none arrives. After returning, `turnId` is null and
-  // `turnActive` is false — the "no active agent run" gate uses that.
+  // fallback when none arrives. After returning, `turnId` is null — the
+  // "no active agent run" gate uses that.
   endRun() {
     const turnId = this.turnId;
     this.turnId = null;
     return turnId;
-  }
-
-  get turnActive() {
-    return this.turnId != null;
   }
 
   // The Codex-style metadata block every cell carries.
