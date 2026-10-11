@@ -5,28 +5,18 @@
 import { ComputerUse } from './computer-use.mjs';
 import { TurnMeta } from './turn-meta.mjs';
 import { discover } from './discovery.mjs';
-import { skillsDir } from './tools-dir.mjs';
 
 export default function (pi, deps = {}) {
-  const computerUse = deps.computerUse ?? globalThis.__computerUseForTests ?? new ComputerUse();
+  const computerUse = deps.computerUse ?? new ComputerUse();
   const turnMeta = deps.turnMeta ?? new TurnMeta();
-  const toolNames = ['computer_use', 'computer_use_reset', 'computer_use_tool_paths'];
+  const toolNames = ['computer_use', 'computer_use_reset'];
 
-  // Ticket #4: name the located guidance files in the always-visible
-  // computer_use description, and back it with a `computer_use_tool_paths`
-  // tool the model can call to re-read the paths. Discovery runs once here
-  // so the description can refer to real paths (not placeholders).
+  // The always-visible computer_use description names the located guidance
+  // files (ticket #4). Discovery runs once so the description refers to real
+  // paths, not placeholders.
   const found = discover();
-  const toolPaths = () => ({
-    computer_use_skill: 'codex-computer-use',
-    computer_use_skills_dir: skillsDir,
-    computer_use_guidance_path: found.docs?.guidance ?? null,
-    computer_use_confirmations_path: found.docs?.confirmationPolicy ?? null,
-    computer_use_sky_api_path: found.docs?.skyReference ?? null,
-    status: found.ok ? 'ok' : 'incomplete',
-  });
   const guidanceBlurb = found.ok
-    ? ` Located: the guidance is \`${found.docs.guidance}\` (computer_use_guidance_path), the confirmation policy \`${found.docs.confirmationPolicy}\` (computer_use_confirmations_path), the sky API reference \`${found.docs.skyReference}\` (computer_use_sky_api_path). The \`computer_use_tool_paths\` tool reports all five, including the skills directory.`
+    ? ` Located: the guidance is \`${found.docs.guidance}\` (computer_use_guidance_path), the confirmation policy \`${found.docs.confirmationPolicy}\` (computer_use_confirmations_path), the sky API reference \`${found.docs.skyReference}\` (computer_use_sky_api_path).`
     : ' Codex installation looks incomplete; the tools may be hidden and a notice names what is missing.';
 
   pi.registerTool({
@@ -48,9 +38,8 @@ export default function (pi, deps = {}) {
     executionMode: 'sequential',
     execute: async (_toolCallId, params, signal) => {
       try {
-        computerUse._assertNotStopped(turnMeta.runId);
         const meta = turnMeta.cellMeta();
-        if (!meta.run_id) throw new Error('computer-use has no active agent run; start a prompt first');
+        if (!meta.turn_id) throw new Error('computer-use has no active agent run; start a prompt first');
         const { text, content } = await computerUse.runCell(params.code, {
           signal,
           timeoutMs: params.timeout_ms,
@@ -70,12 +59,11 @@ export default function (pi, deps = {}) {
     parameters: { type: 'object', properties: {} },
     exposure: 'model-only',
     executionMode: 'sequential',
-    execute: async (_toolCallId, _params, signal) => {
+    execute: async () => {
       try {
-        computerUse._assertNotStopped(turnMeta.runId);
         const meta = turnMeta.cellMeta();
-        if (!meta.run_id) throw new Error('computer-use has no active agent run; start a prompt first');
-        await computerUse.reset({ signal, turnMeta: meta });
+        if (!meta.turn_id) throw new Error('computer-use has no active agent run; start a prompt first');
+        await computerUse.reset();
         return { content: [{ type: 'text', text: 'Codex REPL reset: a fresh REPL starts on the next cell.' }], details: undefined };
       } catch (err) {
         return errorResult('computer_use_reset', err);
@@ -83,26 +71,13 @@ export default function (pi, deps = {}) {
     },
   });
 
-  pi.registerTool({
-    name: 'computer_use_tool_paths',
-    label: 'Computer use: locations of the guidance documents',
-    description:
-      'Report the located paths for Codex computer use: the skill directory, the Codex guidance, the confirmation policy, and the sky API reference (all five paths, in JSON). Use it if you want to re-check where the guidance lives after loading the codex-computer-use skill.',
-    parameters: { type: 'object', properties: {} },
-    exposure: 'model-only',
-    execute: async () => ({
-      content: [{ type: 'text', text: JSON.stringify(toolPaths(), null, 2) }],
-      details: undefined,
-    }),
-  });
-
-  // Ticket #3: incomplete install => hide the tools + capture a notice record
-  // the extension itself exposes (missingNotice）. pi's headless sessions
-  // have no ui surface, so the extension stores the last notice it would have
-  // shown; tests read it from the exposed API instead of session state.
+  // Ticket #3: an incomplete install hides the tools behind a single notice
+  // naming what is missing, sent through pi's ui surface.
   let noticed = false;
   let lastNotice = null;
   pi.on('session_start', (_event, ctx) => {
+    // SSOT: the pi session id names this host session to the runtime.
+    if (ctx?.sessionManager?.getSessionId) turnMeta.setSessionId(ctx.sessionManager.getSessionId());
     const found = discover();
     if (found.ok || noticed) return;
     noticed = true;
@@ -121,12 +96,11 @@ export default function (pi, deps = {}) {
   });
 
   // Run over — settled normally or aborted (physical Escape aborts the run):
-  // signal turn_ended to the runtime; on abort, further computer use in this
-  // run reports the stop (the next prompt begins a fresh run, as Codex does).
+  // signal turn_ended to the runtime, as Codex's own hooks do on Stop/Interrupt.
   pi.on('agent_settled', (event) => {
-    const ended = turnMeta.endRun(event?.turnId);
-    if (!ended) return;
-    const meta = { session_id: turnMeta.sessionId, run_id: ended };
+    const turnId = turnMeta.endRun();
+    if (!turnId) return;
+    const meta = { session_id: turnMeta.sessionId, turn_id: turnId };
     return computerUse.endRun(meta, { aborted: Boolean(event?.aborted) });
   });
 
@@ -134,17 +108,12 @@ export default function (pi, deps = {}) {
   // lets pi's shutdown await the teardown.
   pi.on('session_shutdown', () => computerUse.close());
 
-  // Re-export for tests/introspection. lastNotice records what the extension
-  // would have told the user about an incomplete install (null when complete).
-  const api = {
+  return {
     computerUse,
     turnMeta,
-    missingNotice,
     get lastNotice() { return lastNotice; },
     get lastDiscovery() { return discover(); },
   };
-  globalThis.__extensionApi = api;
-  return api;
 }
 
 // The notice names exactly what is missing from the Codex installation.

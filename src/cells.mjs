@@ -11,6 +11,7 @@ export const SKY_INIT_CELL_TPL = `
 if (!globalThis.__sky) {
   const __mod = await import('__SKY_URL__');
   globalThis.__sky = __mod.sky;
+  globalThis.sky = __mod.sky; // bare binding, like the runtime's own init
 }
 `;
 

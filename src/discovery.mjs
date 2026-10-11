@@ -34,7 +34,7 @@ export function discoverRepl() {
 }
 
 // All node_modules roots the REPL can resolve packages from.
-function nodeModuleRoots(env) {
+export function nodeModuleRoots(env) {
   return (env.NODE_REPL_NODE_MODULE_DIRS ?? '')
     .split(path.delimiter)
     .filter(Boolean)

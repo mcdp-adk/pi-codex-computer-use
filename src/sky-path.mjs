@@ -7,6 +7,7 @@
 // Host-logic file: must never import anything from pi. Zero dependencies.
 import path from 'node:path';
 import fs from 'node:fs';
+import { nodeModuleRoots } from './discovery.mjs';
 
 const SERVICE = 'sky';
 
@@ -21,13 +22,10 @@ export function resolveSkyModule(configEnv) {
     ? specifier.split('/').slice(0, 2).join('/')
     : specifier.split('/')[0];
 
-  const dirsEnv = configEnv.NODE_REPL_NODE_MODULE_DIRS ?? '';
-  const candidateRoots = dirsEnv.split(path.delimiter).filter(Boolean).map((dir) => {
-    // Kernel normalizes bases ending in node_modules to their dirname; both
-    // spellings are accepted so the host finds the package under either.
-    const base = path.basename(dir) === 'node_modules' ? path.dirname(dir) : dir;
-    return path.join(base, 'node_modules', pkgName);
-  });
+  // The REPL normalizes bases ending in node_modules to their dirname; both
+  // spellings are accepted so the host finds the package under either.
+  const candidateRoots = nodeModuleRoots(configEnv).map((root) =>
+    path.join(root, pkgName));
 
   for (const dir of candidateRoots) {
     const pkgJsonPath = path.join(dir, 'package.json');
