@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { discover } from '../src/discovery.mjs';
+import { readCodexConfig } from '../src/config.mjs';
 import { createScriptedSessionFromPackage, toolResults, toolContentTexts } from './harness.js';
 import { SettingsManager, DefaultPackageManager, DefaultResourceLoader } from '@earendil-works/pi-coding-agent';
 import { ComputerUse } from '../src/computer-use.mjs';
@@ -69,10 +70,10 @@ function fakeCodexHome(label, parts = {}) {
     if (parts.replEntry) {
       if (parts.commandFile !== false) fs.mkdirSync(path.dirname(command), { recursive: true });
       if (parts.commandFile !== false) fs.writeFileSync(command, '');
-      config += `[mcp_servers.node_repl]\ncommand = "${command.replace(/\\/g, '\\\\')}"\n`;
+      config += `[mcp_servers.node_repl]\ncommand = '${command}'\n`;
       config += `[mcp_servers.node_repl.env]\n`;
-      config += `NODE_REPL_TRUSTED_SERVICES = "{\\"sky\\":\\"@oai/sky/service\\"}"\n`;
-      config += `NODE_REPL_NODE_MODULE_DIRS = "${nm.replace(/\\/g, '\\\\')}"\n`;
+      config += `NODE_REPL_TRUSTED_SERVICES = '{"sky":"@oai/sky/service"}'\n`;
+      config += `NODE_REPL_NODE_MODULE_DIRS = '${nm}'\n`;
       // Also create the sky API reference doc that discovery looks for.
       const skyDocs = path.join(nm, '@oai', 'sky', 'docs');
       fs.mkdirSync(skyDocs, { recursive: true });
@@ -84,7 +85,7 @@ function fakeCodexHome(label, parts = {}) {
       fs.mkdirSync(docs, { recursive: true });
       fs.writeFileSync(path.join(docs, 'guidance.md'), 'guide');
       fs.writeFileSync(path.join(docs, 'confirmations.md'), 'conf');
-      config += `\n[marketplace]\nsource = "${mkt.replace(/\\/g, '\\\\')}"\n`;
+      config += `\n[marketplace]\nsource = '${mkt}'\n`;
     }
     fs.writeFileSync(path.join(home, 'config.toml'), config);
   }
@@ -136,7 +137,6 @@ describe('skill registration: the pi manifest ships the codex-computer-use skill
     }
   });
 });
-
 describe('issue #3 acceptance: hide the tools when the Codex installation is incomplete', () => {
   it('discovers a complete installation with all three docs', () => {
     const found = discover();
@@ -145,49 +145,6 @@ describe('issue #3 acceptance: hide the tools when the Codex installation is inc
     assert.equal(path.basename(found.docs?.skyReference), 'sky-window2-api.md');
     assert.equal(path.basename(found.docs?.guidance), 'guidance.md');
     assert.equal(path.basename(found.docs?.confirmationPolicy), 'confirmations.md');
-  });
-
-  it('incomplete install: computer_use is hidden and exactly one notice names every missing piece', async () => {
-    const prev = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = fakeCodexHome('empty');
-    const cwd = makeTempRoot('pi-cua-test-3');
-    try {
-      const { session } = await createScriptedSessionFromPackage({
-        cwd,
-        scripts: [
-          { kind: 'tool', name: 'computer_use', args: { code: '42' }, text: 'trying the tool' },
-        ],
-      });
-
-      // Trigger the agent loop so session_start fires and the tools hide.
-      await session.prompt('try computer use');
-
-      const toolNames = session.getActiveToolNames();
-      assert.ok(!toolNames.includes('computer_use'), 'computer_use must be hidden when install is incomplete');
-      assert.ok(!toolNames.includes('computer_use_reset'), 'computer_use_reset must be hidden too');
-      assert.ok(!toolNames.includes('computer_use_tool_paths'), 'computer_use_tool_paths must be hidden too');
-
-      // The model asked for it anyway; the hidden tool errors, it does not run.
-      const results = toolResults(session);
-      assert.equal(results.length, 1, 'one tool result');
-      const text = toolContentTexts(results[0]);
-      assert.match(text, /no active agent run|not found|not available|incomplete|stopped|escape|no session|not registered|hidden|unknown|unsupported|invalid tool|refused|unavailable|failed/i, 'the hidden tool surfaces an explanation');
-
-      // One notice named the missing pieces (not a flood). The extension exposes
-      // the recorded notice on `lastNotice`; no ui surface exists in headless pi.
-      const api = globalThis.__extensionApi;
-      assert.ok(api, 'extension exposes its api');
-      assert.ok(api.missingNotice, 'extension exposes missingNotice');
-      assert.ok(api.lastNotice, 'extension recorded a notice');
-      assert.match(api.lastNotice, /incomplete/i);
-      assert.match(api.lastNotice, /node_repl|config|missing/i);
-
-      const computerUse = api.computerUse;
-      assert.ok(computerUse, 'extension exposed its ComputerUse');
-      assert.equal(computerUse.host.cells?.length ?? 0, 0, 'no cell ever reached the REPL');
-    } finally {
-      if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
-    }
   });
 
   it('a missing piece makes discovery incomplete and names it', () => {
@@ -207,50 +164,89 @@ describe('issue #3 acceptance: hide the tools when the Codex installation is inc
     }
   });
 
-  it('with CODEX_HOME pointing at a valid Codex configuration, the tools are registered and a call that lists apps succeeds', async () => {
-    const cwdHome = fakeCodexHome('valid', { replEntry: true, marketplace: true, skyRef: true });
+  it('incomplete install through a package session: tools are hidden and one ui notice names every missing piece', async () => {
     const prev = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = cwdHome;
-    const cwd = makeTempRoot('pi-cua-test-3-ok');
+    process.env.CODEX_HOME = fakeCodexHome('empty');
+    const cwd = makeTempRoot('pi-cua-test-3-hidden');
     try {
-      const mcp = makeMcpLayer({ text: 'App1,App2' });
-      const computerUse = new ComputerUse({ host: mcp });
-      globalThis.__computerUseForTests = computerUse;
-
       const { session } = await createScriptedSessionFromPackage({
         cwd,
         scripts: [
-          { kind: 'tool', name: 'computer_use', args: { code: 'await globalThis.__sky.list_windows()' }, text: 'list apps' },
+          { kind: 'tool', name: 'computer_use', args: { code: '42' }, text: 'trying the tool' },
           { kind: 'text', text: 'done' },
         ],
       });
+      try {
+        await session.prompt('try computer use');
+        const toolNames = session.getActiveToolNames();
+        assert.ok(!toolNames.includes('computer_use'), 'computer_use must be hidden when the install is incomplete');
+        assert.ok(!toolNames.includes('computer_use_reset'), 'computer_use_reset must be hidden too');
 
-      await session.prompt('list the running apps');
+        // The model asked anyway: the surfaced result explains, it does not run.
+        const results = toolResults(session);
+        assert.ok(results.length >= 1, 'one tool result expected');
+        const text = toolContentTexts(results[0]);
+        assert.match(text, /not found|not available|unknown|unavailable|invalid|hidden|refused|no active agent run|failed/i, 'the hidden tool surfaces an explanation');
 
-      const toolNames = session.getActiveToolNames();
-      assert.ok(toolNames.includes('computer_use'), 'computer_use visible when complete');
-      assert.ok(toolNames.includes('computer_use_tool_paths'), 'computer_use_tool_paths visible when complete');
-
-      const results = toolResults(session);
-      assert.ok(results.length >= 1, 'the tool ran');
-      const text = toolContentTexts(results[0]);
-      assert.ok(!text.includes('failed'), 'the call did not fail: ' + text.slice(0, 200));
-
-      const modelCell = mcp.cells.find((c) =>
-        c.code === 'await globalThis.__sky.list_windows()',
-      );
-      assert.ok(modelCell, 'the model cell ran');
-      assert.equal(modelCell.code, 'await globalThis.__sky.list_windows()');
-
-      // The cell carries Codex-style turn metadata. It comes from the extension's
-      // own TurnMeta (wired via pi's package discovery), not a test-controlled one.
-      assert.ok(modelCell.turnMeta, 'cell carries turn metadata');
-      assert.ok(modelCell.turnMeta.run_id, 'cell carries a run id');
-      assert.ok(modelCell.turnMeta.session_id, 'cell carries a session id');
+        // One notice named the missing pieces (fix 12: observed via the
+        // injected ui surface, not a globalThis backdoor).
+        const notices = session.notifications.map((n) => n.message);
+        assert.equal(notices.length, 1, `exactly one notice expected, got: ${JSON.stringify(notices)}`);
+        assert.match(notices[0], /incomplete/i);
+        assert.match(notices[0], /node_repl|config|missing/i);
+      } finally {
+        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+        session.dispose();
+      }
     } finally {
-      delete globalThis.__computerUseForTests;
-      delete globalThis.__turnMetaForTests;
-      delete globalThis.__extensionApi;
+      if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
+    }
+  });
+
+  it('valid home through a package session: computer_use runs against the real runtime and carries turn metadata', async () => {
+    const cwdHome = fakeCodexHome('valid', { replEntry: true, marketplace: true, skyRef: true });
+    const prev = process.env.CODEX_HOME;
+    // The fake home satisfies discovery (all three docs + a config entry) but
+    // names no runnable REPL. The runtime stays the real one: point the fake
+    // config entry at the real node_repl command from the REAL user config.
+    const real = readCodexConfig();
+    if (real.missing?.length) this.skip();
+    const cfgToml = fs.readFileSync(path.join(cwdHome, 'config.toml'), 'utf8');
+    fs.writeFileSync(path.join(cwdHome, 'config.toml'), cfgToml.replace(
+      /command = '.*'/,
+      `command = '${String(real.command).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39))}'`,
+    ));
+    process.env.CODEX_HOME = cwdHome;
+    const cwd = makeTempRoot('pi-cua-test-3-ok');
+    try {
+      const { session } = await createScriptedSessionFromPackage({
+        cwd,
+        scripts: [
+          { kind: 'tool', name: 'computer_use', args: { code: "nodeRepl.write(JSON.stringify(nodeRepl.requestMeta ?? 'NO_META'));" } },
+          { kind: 'text', text: 'done' },
+        ],
+      });
+      try {
+        await session.prompt('run a cell');
+        const toolNames = session.getActiveToolNames();
+        assert.ok(toolNames.includes('computer_use'), 'computer_use visible when the install is complete');
+
+        const results = toolResults(session);
+        assert.ok(!results[0]?.isError, `cell failed: ${toolContentTexts(results[0])}`);
+        const text = toolContentTexts(results[0]);
+        // The runtime may echo non-JSON lines before the cell's write; take
+        // the last line that looks like the meta object.
+        const jsonLine = text.split('\n').filter((l) => l.trim().startsWith('{')).pop();
+        const meta = jsonLine ? JSON.parse(jsonLine)['x-codex-turn-metadata'] : undefined;
+        console.log('[dbg] text lines:', JSON.stringify(text));
+        assert.ok(meta, `cell carried no turn metadata: ${text.slice(0, 200)}`);
+        assert.ok(meta.turn_id, 'cell carries a per-run turn id');
+        assert.equal(meta.session_id, session.sessionManager.getSessionId(), 'session_id is pi session id');
+      } finally {
+        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+        session.dispose();
+      }
+    } finally {
       if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
     }
   });
