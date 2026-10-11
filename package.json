@@ -4,6 +4,10 @@
   "description": "pi extension: run cells in the Codex REPL to drive Windows desktop apps",
   "type": "module",
   "main": "src/extension.mjs",
+  "files": [
+    "src",
+    "skills"
+  ],
   "engines": {
     "node": ">=20"
   },
