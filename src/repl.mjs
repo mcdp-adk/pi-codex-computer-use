@@ -10,11 +10,14 @@ import { McpStdioClient } from './mcp-client.mjs';
 
 const CALL_TIMEOUT_MS = 120000;
 
+export const RESET_NOTICE = 'Codex REPL state was reset: a new REPL was started.';
+
 export class ReplHost {
   constructor({ tmpDir } = {}) {
     this.tmpDir = tmpDir ?? path.join(os.tmpdir(), 'pi-codex-repl');
     this.client = null;
     this.stderr = '';
+    this._hasRunBefore = false;
   }
 
   get running() {
@@ -48,24 +51,30 @@ export class ReplHost {
 
   // Run one cell (JavaScript) in the REPL. Returns the MCP result
   // { content: [...], isError } with text/image blocks passed through.
-  async runCell(code, { timeoutMs = CALL_TIMEOUT_MS } = {}) {
+  // `signal`, when given, cancels the in-flight MCP request: the promise
+  // rejects promptly with 'aborted by caller' instead of waiting for the
+  // cell to finish.
+  async runCell(code, { timeoutMs = CALL_TIMEOUT_MS, signal } = {}) {
     await this.ensureStarted();
-    const result = await this.client.callTool('js', { code, title: 'pi computer use', timeout_ms: timeoutMs }, timeoutMs + 5000);
+    const result = await this.client.callTool('js', { code, timeout_ms: timeoutMs }, timeoutMs + 5000, signal);
     return result;
   }
 
-  // If the REPL died (e.g. user closed a window it needed), the next call
-  // auto-restarts: ensureStarted relaunches; surface a reset notice to the model.
+  // If the REPL died (crash / killed / window closed), the next call
+  // auto-restarts via ensureStarted, and sky is re-initialised by the
+  // caller; `computerUse` prefixes the result with a reset notice.
   async runCellWithResetNotice(code, opts) {
     const wasRunning = this.running;
     const result = await this.runCell(code, opts);
-    if (!wasRunning) {
-      const notice = 'Codex REPL was not running; a new REPL was started.';
+    if (!wasRunning && this._hasRunBefore) {
       const text = (result?.content ?? []).filter((c) => c.type === 'text');
       if (result?.content) {
-        result.content = [{ type: 'text', text: notice }, ...result.content];
+        result.content = [{ type: 'text', text: RESET_NOTICE }, ...result.content];
+      } else {
+        result.content = [{ type: 'text', text: RESET_NOTICE }];
       }
     }
+    this._hasRunBefore = true;
     return result;
   }
 

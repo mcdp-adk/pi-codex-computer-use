@@ -119,18 +119,39 @@ export class McpStdioClient {
     this.proc.stdin.write(JSON.stringify(obj) + '\n');
   }
 
-  request(method, params, timeoutMs = 120000) {
+  request(method, params, timeoutMs = 120000, signal) {
     const id = this.nextId++;
     const p = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`mcp request timed out: ${method} (${timeoutMs}ms)`));
       }, timeoutMs);
+      const cleanup = () => {
+        if (signal) signal.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        // Best-effort MCP cancellation; the server may ignore it.
+        try {
+          if (this.proc) this.notify('notifications/cancelled', { requestId: id, reason: 'client aborted' });
+        } catch {}
+        reject(new Error('aborted by caller'));
+      };
       this.pending.set(id, {
-        resolve: (v) => { clearTimeout(timer); resolve(v); },
-        reject: (e) => { clearTimeout(timer); reject(e); },
+        resolve: (v) => { clearTimeout(timer); cleanup(); resolve(v); },
+        reject: (e) => { clearTimeout(timer); cleanup(); reject(e); },
       });
+      if (signal) {
+        if (signal.aborted) {
+          this.pending.delete(id);
+          return onAbort();
+        }
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
     });
+    // An already-aborted signal rejected the promise above; do not send.
+    if (signal?.aborted) return p;
     this._send({ jsonrpc: '2.0', id, method, params });
     return p;
   }
@@ -148,8 +169,8 @@ export class McpStdioClient {
     return result.tools ?? [];
   }
 
-  async callTool(name, args, timeoutMs = 120000) {
-    return this.request('tools/call', { name, arguments: args }, timeoutMs);
+  async callTool(name, args, timeoutMs = 120000, signal) {
+    return this.request('tools/call', { name, arguments: args }, timeoutMs, signal);
   }
 
   async close() {
