@@ -4,7 +4,7 @@
 import { ReplHost, RESET_NOTICE } from './repl.mjs';
 import { readCodexConfig } from './config.mjs';
 import { resolveSkyModule } from './sky-path.mjs';
-import { skyInitCell, LIST_APPS_CELL, newScreenshotCell } from './cells.mjs';
+import { skyInitCell, pickWindowCell, newScreenshotCell } from './cells.mjs';
 
 export class ComputerUse {
   constructor(opts) {
@@ -25,32 +25,31 @@ export class ComputerUse {
   // Run one model cell. `turnMeta` is the run's Codex-style metadata the cell
   // carries; `signal` is pi's AbortSignal, forwarded so the MCP request
   // cancels promptly on abort. A pending reset notice rides along as the
-  // FIRST content block even when the cell fails (review fix 8).
+  // FIRST content block even when the cell fails.
   async runCell(code, { signal, timeoutMs, turnMeta } = {}) {
     await this.noticeIfRelaunched();
     try {
-      await this.ensureSky();
+      await this.ensureSky({ signal, turnMeta });
       const r = await this.host.runCell(code, { signal, timeoutMs, turnMeta });
       if (r?.isError) throw new Error(textOf(r) || 'REPL cell failed');
       return withResetNotice(this, { text: textOf(r), content: r.content ?? [] });
     } catch (err) {
-      // The notice still rides along when the cell errors (fix 8): the model
+      // The notice still rides along when the cell errors: the model
       // sees that the state came from a fresh REPL, not the one it knew.
       if (this.resetNotice) {
         const message = err instanceof Error ? err.message : String(err);
         err = new Error(`${RESET_NOTICE}\n${message}`);
-        err.fromReset = true;
       }
       throw err;
     }
   }
 
-  async ensureSky() {
+  async ensureSky({ signal, turnMeta } = {}) {
     if (this.skyReady) return;
     const cfg = readCodexConfig();
     if (cfg.missing) throw new Error(`Cannot start Codex REPL: missing ${cfg.missing.join('; ')}`);
     this.skyUrl = resolveSkyModule(cfg.env);
-    const r = await this.host.runCell(skyInitCell(this.skyUrl), { timeoutMs: 30000 });
+    const r = await this.host.runCell(skyInitCell(this.skyUrl), { timeoutMs: 30000, signal, turnMeta });
     if (r?.isError) throw new Error(`sky init failed: ${textOf(r)}`);
     this.skyReady = true;
   }
@@ -67,23 +66,23 @@ export class ComputerUse {
     return this.resetNotice;
   }
 
+  // Enumerate desktop windows through the real runtime (the discovery
+  // acceptance lists apps successfully through a migrated CODEX_HOME).
   async listApps(opts = {}) {
-    return this.runCell(LIST_APPS_CELL, opts);
+    return this.runCell(
+      `nodeRepl.write(JSON.stringify(await globalThis.__sky.list_apps()));`,
+      opts,
+    );
   }
 
   // Screenshot a desktop window: returns { text, images } where images are the
-  // runtime's image blocks ({ data, mimeType }). Skips minimized windows —
-  // the runtime cannot capture those.
+  // runtime's image blocks ({ data, mimeType }). The pick cell uses only real
+  // sky Window fields (id, app, title) plus activate_window, whose error
+  // advice is the runtime's own way of handling windows it cannot capture.
   async takeScreenshot(opts = {}) {
     await this.noticeIfRelaunched();
-    await this.ensureSky();
-    const pickCell = `
-const __all = await globalThis.__sky.list_windows();
-const __win = __all.find((w) => !w.isMinimized) ?? __all[0];
-if (!__win) throw new Error('no window available for screenshot');
-nodeRepl.write(JSON.stringify({ id: __win.id, title: __win.title }));
-`;
-    const pickRun = await this.host.runCell(pickCell, { timeoutMs: 30000, ...opts });
+    await this.ensureSky(opts);
+    const pickRun = await this.host.runCell(pickWindowCell(), { timeoutMs: 30000, ...opts });
     if (pickRun?.isError) throw new Error(textOf(pickRun));
     const win = JSON.parse(textOf(pickRun));
 

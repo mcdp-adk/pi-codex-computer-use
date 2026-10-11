@@ -5,17 +5,17 @@
 
 // sky is not a bare-resolvable package in the runtime's node_modules; the
 // host resolves its on-disk path (src/sky-path.mjs) and injects it as a
-// file-URL import. `__SKY_URL__` is substituted.
-
-export const SKY_INIT_CELL_TPL = `
+// file-URL import. SKY_URL_LITERAL is a ready string literal, so no
+// identifier or quote in the path can break the cell.
+const SKY_INIT_CELL_TPL = `
 if (!globalThis.__sky) {
-  const __mod = await import('__SKY_URL__');
+  const __mod = await import(SKY_URL_LITERAL);
   globalThis.__sky = __mod.sky;
   globalThis.sky = __mod.sky; // bare binding, like the runtime's own init
 }
 `;
 
-export const LIST_APPS_CELL = `
+const LIST_APPS_CELL = `
 const __apps = await globalThis.__sky.list_apps();
 const __withWindows = __apps.filter((a) => a.windows?.length);
 nodeRepl.write(JSON.stringify(__withWindows.map((a) => ({
@@ -25,14 +25,21 @@ nodeRepl.write(JSON.stringify(__withWindows.map((a) => ({
 }))));
 `;
 
-// Pick a capture target the runtime will allow: the model asks for a specific
-// window; the runtime may refuse browser windows (URL policy), so the default
-// falls back to the first non-browser window, then any non-minimized window.
+// Pick a capture target the runtime will allow. The real sky Window type
+// (@oai/sky, window2) has no minimized flag; instead the cell activates the
+// first window, which input calls require and whose own error advice —
+// call activate_window, refresh with get_window, retry — this follows.
+const PICK_WINDOW_CELL = `
+const __all = await globalThis.__sky.list_windows();
+if (!__all.length) throw new Error('no window available for screenshot');
+await globalThis.__sky.activate_window({ window: __all[0] });
+const __win = await globalThis.__sky.get_window({ id: __all[0].id, app: __all[0].app });
+nodeRepl.write(JSON.stringify({ id: __win.id, app: __win.app, title: __win.title }));
+`;
+
 export const SCREENSHOT_CELL_TPL = `
 const __all = await globalThis.__sky.list_windows();
 const __win = __all.find((w) => w.id === __WINDOW_ID__)
-  ?? __all.find((w) => !w.isMinimized && !/edge|chrome|firefox|msedge|browser/i.test(String(w.app ?? w.appId ?? '')))
-  ?? __all.find((w) => !w.isMinimized)
   ?? __all[0];
 if (!__win) throw new Error('no window available for screenshot');
 const __state = await globalThis.__sky.get_window_state({
@@ -45,9 +52,13 @@ nodeRepl.write(JSON.stringify({ window: { id: __win.id, title: __win.title }, sc
 `;
 
 export function skyInitCell(skyUrl) {
-  return SKY_INIT_CELL_TPL.replace('__SKY_URL__', skyUrl);
+  return SKY_INIT_CELL_TPL.replace('SKY_URL_LITERAL', JSON.stringify(skyUrl));
 }
 
 export function newScreenshotCell(windowId) {
   return SCREENSHOT_CELL_TPL.replace('__WINDOW_ID__', JSON.stringify(windowId));
+}
+
+export function pickWindowCell() {
+  return PICK_WINDOW_CELL;
 }
