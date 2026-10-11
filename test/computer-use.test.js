@@ -190,13 +190,27 @@ withRuntime('run a cell in the Codex REPL from pi', () => {
     }
   });
 
-  it('criterion 6: REPL session runs a cell with the config untouched', async () => {
+  it('criterion 6: REPL session runs a cell with the config untouched and the routing variables deleted', async () => {
     const configPath = readCodexConfig().file;
     const before = fs.readFileSync(configPath);
+    // Plant the three app-routing variables with deliberately bogus values in
+    // the TEST process env (the base the host merges the Codex config over).
+    // If the host kept them, the cell would route through a pipe directory
+    // that no process ever created and the call would fail (probed: with the
+    // variables kept, sky never initialises and list_apps errors out).
+    // Their deletion is therefore observable from inside a cell, behaviorally.
+    const planted = {
+      SKY_CUA_NATIVE_PIPE: '1',
+      SKY_CUA_NATIVE_PIPE_DIRECTORY: '\\\\.\\pipe\\codex-computer-use-bogus-test',
+      CODEX_CLI_PATH: 'C:\\bogus\\codex.exe',
+    };
+    const prevEnv = Object.fromEntries(Object.keys(planted).map((k) => [k, process.env[k]]));
+    Object.assign(process.env, planted);
+    const expectedTmpDir = path.join(os.tmpdir(), 'pi-codex-repl');
     const { session } = await createScriptedSession({
       cwd: root,
       scripts: [
-        { kind: 'tool', name: 'computer_use', args: { code: "nodeRepl.write('env check');" } },
+        { kind: 'tool', name: 'computer_use', args: { code: "nodeRepl.write(JSON.stringify({ tmpDir: nodeRepl.tmpDir, apps: (await globalThis.sky.list_apps()).slice(0, 1) }));" } },
         { kind: 'text', text: 'done' },
       ],
     });
@@ -204,10 +218,25 @@ withRuntime('run a cell in the Codex REPL from pi', () => {
       await session.prompt('go');
       const results = toolResults(session);
       assert.ok(!results[0]?.isError, `cell failed: ${toolContentTexts(results[0])}`);
-      assert.match(toolContentTexts(results[0]), /env check/);
+      const observed = JSON.parse(toolContentTexts(results[0]));
+      // Temp directory pointed at the host's writable tmp dir (observable).
+      assert.equal(
+        path.resolve(observed.tmpDir),
+        path.resolve(expectedTmpDir),
+        `cell observed tmpDir ${observed.tmpDir}, expected the host tmp dir ${expectedTmpDir}`,
+      );
+      // Routing variables deleted: with them kept (bogus pipe, bogus cli path)
+      // the call fails — success is the observable witness of their deletion.
+      assert.ok(
+        Array.isArray(observed.apps) && observed.apps.length > 0,
+        'list_apps under planted bogus routing variables returned no apps',
+      );
     } finally {
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
       session.dispose();
+      for (const [k, v] of Object.entries(prevEnv)) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
     }
     const after = fs.readFileSync(configPath);
     assert.ok(before.equals(after), 'Codex config file changed during run');
