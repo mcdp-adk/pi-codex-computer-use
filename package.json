@@ -1,0 +1,17 @@
+{
+  "name": "pi-codex-computer-use",
+  "version": "0.1.0",
+  "description": "pi extension: run cells in the Codex REPL to drive Windows desktop apps",
+  "type": "module",
+  "main": "src/extension.mjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test --test-reporter=spec \"test/*.test.js\""
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.1.0"
+  },
+  "private": true
+}
