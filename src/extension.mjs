@@ -1,22 +1,22 @@
 // pi extension entry: registers the computer-use tools backed by the Codex
-// REPL host, AND (ticket #3) hides them — with a single notice naming what is
-// missing — whenever the Codex installation is incomplete.
+// REPL host, and (ticket #5) wires the per-agent-run Escape stop.
 // This is the ONLY file allowed to import pi.
 import { ComputerUse } from './computer-use.mjs';
-import { discover } from './discovery.mjs';
+import { TurnMeta } from './turn-meta.mjs';
 
-// Single shared host for this pi process so tests and the extension agree on
-// one REPL; the default export (re)binds tools to this instance.
+// Single shared host + run identity for this pi process so tests and the
+// extension agree on one REPL and one run registry.
 export const computerUse = new ComputerUse();
-
-const TOOL_NAMES = ['list_apps', 'take_screenshot'];
-const PI_BUILTINS = ['read', 'bash', 'edit', 'write'];
+export const turnMeta = new TurnMeta();
 
 export default function (pi) {
-  // Registering is unconditional; on an incomplete install the tools stay
-  // hidden (never activate) and the session gets one notice naming the gap.
-  // Keeping registration constant preserves the pi loader's registration
-  // ordering while visibility is decided per-session at session_start.
+
+  // Stop computer use for the rest of the current agent run. Called on the
+  // Escape/abort signal and when a run ends; a new run clears the stop.
+  const stopCurrentRun = (msg) => {
+    const stopped = computerUse.stopRun(turnMeta.runId);
+    return stopped;
+  };
 
   pi.registerTool({
     name: 'list_apps',
@@ -25,6 +25,7 @@ export default function (pi) {
     parameters: { type: 'object', properties: {} },
     execute: async () => {
       try {
+        computerUse._assertNotStopped(turnMeta.runId);
         const text = await computerUse.listApps();
         return { content: [{ type: 'text', text }], details: undefined };
       } catch (err) {
@@ -40,6 +41,7 @@ export default function (pi) {
     parameters: { type: 'object', properties: {} },
     execute: async () => {
       try {
+        computerUse._assertNotStopped(turnMeta.runId);
         const { text, images } = await computerUse.takeScreenshot();
         const content = [{ type: 'text', text }];
         for (const img of images) {
@@ -52,24 +54,21 @@ export default function (pi) {
     },
   });
 
-  let noticed = false;
+  // Each new agent run (each prompt) begins a fresh run id; computer use in
+  // this run is permitted again and carries the run as metadata.
+  pi.on('agent_start', (_event, _ctx) => {
+    turnMeta.beginRun();
+  });
 
-  pi.on('session_start', (_event, ctx) => {
-    const found = discover();
-    if (found.ok) return; // complete install: tools stay active, no notice
-    if (noticed) return; // one notice per extension lifetime
-    noticed = true;
-    const message = missingNotice(found.missing);
-    // Hide: drop our tool names from the session's active tools. Reach the
-    // AgentSession through a bound call — pi's extension API routes the
-    // session through `ctx` here; if absent (older runtime), fall back to a
-    // module-level session reference captured at registration time.
-    const session = activeSession();
-    if (session?.setActiveToolsByName) {
-      session.setActiveToolsByName(session.getActiveToolNames().filter((n) => !TOOL_NAMES.includes(n)));
-    }
-    if (ctx?.ui?.notify) ctx.ui.notify(message, 'warning');
-    else if (ctx?.uiContext?.notify) ctx.uiContext.notify(message, 'warning');
+  // Run over (model finished): the run ends; any Escape stop on it dies here.
+  pi.on('agent_end', (_event, _ctx) => {
+    turnMeta.endRun();
+  });
+
+  // The physical Escape key aborts the model loop in the terminal; pi surfaces
+  // that as abort — our signal to stop computer use for the rest of the run.
+  pi.on('abort', (_event, _ctx) => {
+    stopCurrentRun();
   });
 
   pi.on('session_shutdown', () => {
@@ -77,27 +76,6 @@ export default function (pi) {
     void computerUse.close();
   });
 
-  // Re-export so tests/introspection can reach the live host via the module.
-  return { computerUse, missingNotice, get lastDiscovery() { return discover(); } };
-}
-
-// The notice names exactly what is missing from the Codex installation.
-export function missingNotice(missing) {
-  const list = missing.map((m) => `  - ${m}`).join('\n');
-  return [
-    'codex-computer-use: Codex installation is incomplete, computer-use tools are unavailable.',
-    'Missing:',
-    list,
-  ].join('\n');
-}
-
-// Test backdoor: tests set this to the live AgentSession so the handler can
-// strip tools. In a real pi TUI the session routes here via ctx; a
-// module-level reference keeps the mechanism testable.
-let _activeSession = null;
-export function activeSession() {
-  return _activeSession;
-}
-export function _setActiveSessionForTests(s) {
-  _activeSession = s;
+  // Re-export so tests/introspection can reach the live host + run identity.
+  return { computerUse, turnMeta };
 }

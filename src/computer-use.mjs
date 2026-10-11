@@ -61,6 +61,23 @@ nodeRepl.write(JSON.stringify({ id: __win.id, title: __win.title }));
     await this.host.close();
     this.skyReady = false;
   }
+
+  // Ticket #5: Escape stop. Mark `runId` stopped and, when an Escape key or
+  // the abort of an agent run is detected, block any further computer-use cells
+  // for the rest of that run. A new run (next prompt) clears the stop because
+  // TurnMeta regenerates its id — there is nothing to reset here.
+  stopRun(runId) {
+    this._stoppedRunId = runId ?? this._stoppedRunId;
+    return { stopped: this._stoppedRunId };
+  }
+
+  // Throw before a cell runs if this run has been Escape-stopped. Tools call
+  // this first so a stopped run surfaces the runtime's stop, not a fresh cell.
+  _assertNotStopped(runId) {
+    if (this._stoppedRunId && runId && this._stoppedRunId === runId) {
+      throw new Error('Computer use is stopped for this agent run (Escape pressed). The next prompt may use computer use again.');
+    }
+  }
 }
 
 function textOf(r) {
