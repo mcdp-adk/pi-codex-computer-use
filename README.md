@@ -4,13 +4,32 @@ A [pi](https://pi.dev) package that lets pi drive Windows desktop apps through t
 
 It talks to Codex's own `node_repl` MCP server, where the model writes JavaScript against `@oai/sky`, the same way Codex uses it.
 
-## Status
-
-Early development. Not usable yet.
-
 ## Requirements
 
 - Windows
-- The Codex desktop app, installed locally
+- The [Codex desktop app](https://openai.com/codex), installed locally and signed in once (so Codex writes its configuration)
 
-This package ships no Codex files. It locates and runs the Codex runtime already installed on your machine.
+This package ships no Codex files. It discovers and runs the Codex runtime already installed on your machine.
+
+## Install
+
+```sh
+git clone https://github.com/mcdp-adk/pi-codex-computer-use.git
+cd pi-codex-computer-use
+npm install
+pi install ./path/to/pi-codex-computer-use
+```
+
+`pi install` adds the package to your settings; the extension registers the `computer_use` / `computer_use_reset` / `list_apps` / `take_screenshot` / `computer_use_tool_paths` tools, and the `codex-computer-use` skill becomes available to the model.
+
+## Use
+
+The tools stay inactive (with a single notice naming what is missing) until the Codex installation is complete; then the model can run cells in the Codex REPL. Read the loaded guidance first — `computer_use_tool_paths` reports the on-disk locations of the located Codex guidance, confirmation policy, and sky API reference.
+
+## Tests
+
+```sh
+npm test
+```
+
+`test/computer-use.test.js` and `test/reset-abort.test.js` run against the real Codex runtime and require a signed Codex installation; they skip cleanly when one is not present.
