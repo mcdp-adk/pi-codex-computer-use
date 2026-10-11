@@ -148,6 +148,7 @@ export async function createScriptedSession({ scripts, cwd }) {
 // the package.json pi manifest, not by importing src/extension.mjs directly.
 export async function createScriptedSessionFromPackage({ scripts, cwd }) {
   let remaining = [...scripts];
+  const notifications = [];
   const streamSimple = (model, context, options) => {
     const stream = createAssistantMessageEventStream();
     const next = remaining.shift() ?? { kind: 'text', text: 'done' };
@@ -169,9 +170,7 @@ export async function createScriptedSessionFromPackage({ scripts, cwd }) {
   // SettingsManager.inMemory({ packages: [...] }) writes the packages list into
   // InMemorySettingsStorage under scope "global"; PackageManager reads the merged
   // settings to find the package sources. Do NOT wrap in { globalSettings: {...} }.
-  const settingsManager = SettingsManager.inMemory({
-    packages: [repoRoot],
-  });
+  const settingsManager = SettingsManager.inMemory({ packages: [repoRoot] });
   const packageManager = new DefaultPackageManager({
     cwd,
     agentDir: cwd,
@@ -203,10 +202,20 @@ export async function createScriptedSessionFromPackage({ scripts, cwd }) {
     model: MODEL,
   });
   const session = result.session ?? result;
-
+  // Headless tests observe notices through the injected ui surface, like the
+  // direct-extension path does (review fix 12: no globalThis backdoors).
+  session.notifications = notifications;
   // bindExtensions fires the session_start hook that pi's CLI would send.
-  // The headless test harness must run it explicitly (print/json/rpc/tui all do).
-  await session.bindExtensions({});
+  // The headless test harness must run it explicitly (print/json/rpc/tui all
+  // do); the uiContext is injected so ctx.ui.notify can be observed.
+  await session.bindExtensions({ uiContext: {
+    notify: (message, level) => notifications.push({ message, level }),
+    select: async () => undefined,
+    confirm: async () => false,
+    input: async () => undefined,
+    editor: async () => undefined,
+    custom: async () => undefined,
+  } });
 
   return { session, loader };
 }
