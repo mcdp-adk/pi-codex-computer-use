@@ -17,7 +17,9 @@ export class ReplHost {
     this.tmpDir = tmpDir ?? path.join(os.tmpdir(), 'pi-codex-repl');
     this.client = null;
     this.stderr = '';
-    this._hasRunBefore = false;
+    // Escape stop: set to a run id by stopRun; cells for that run refuse to
+    // run until a new run id no longer matches (the id mints per agent run).
+    this._stoppedRunId = null;
   }
 
   get running() {
@@ -51,36 +53,56 @@ export class ReplHost {
 
   // Run one cell (JavaScript) in the REPL. Returns the MCP result
   // { content: [...], isError } with text/image blocks passed through.
-  // `signal`, when given, cancels the in-flight MCP request: the promise
-  // rejects promptly with 'aborted by caller' instead of waiting for the
-  // cell to finish.
-  async runCell(code, { timeoutMs = CALL_TIMEOUT_MS, signal } = {}) {
+  // Per `turnMeta`, the cell script opens by publishing the run's Codex-style
+  // turn metadata on globalThis (node_repl's `js` tool does not accept a
+  // metadata argument — Codex's hooks pass it to `turn_ended` instead).
+  // Per `signal`, pi's AbortSignal cancels the MCP request promptly instead
+  // of waiting for the cell to finish.
+  async runCell(code, { timeoutMs = CALL_TIMEOUT_MS, signal, turnMeta } = {}) {
     await this.ensureStarted();
-    const result = await this.client.callTool('js', { code, timeout_ms: timeoutMs }, timeoutMs + 5000, signal);
+    const cell = turnMeta
+      ? `globalThis.__cua_turn_metadata = ${JSON.stringify({ session_id: turnMeta.session_id, run_id: turnMeta.run_id })};\n${code}`
+      : code;
+    const mcpArgs = { code: cell, timeout_ms: timeoutMs };
+    const result = await this.client.callTool('js', mcpArgs, timeoutMs + 5000, signal);
     return result;
   }
 
-  // If the REPL died (crash / killed / window closed), the next call
-  // auto-restarts via ensureStarted, and sky is re-initialised by the
-  // caller; `computerUse` prefixes the result with a reset notice.
-  async runCellWithResetNotice(code, opts) {
-    const wasRunning = this.running;
-    const result = await this.runCell(code, opts);
-    if (!wasRunning && this._hasRunBefore) {
-      const text = (result?.content ?? []).filter((c) => c.type === 'text');
-      if (result?.content) {
-        result.content = [{ type: 'text', text: RESET_NOTICE }, ...result.content];
-      } else {
-        result.content = [{ type: 'text', text: RESET_NOTICE }];
-      }
+  // Signal the runtime that a turn has ended (normal or aborted), the way
+  // Codex's own hooks do on Stop/Interrupt. Escape-stop relies on it.
+  // Best-effort: the goodbye must never stall the run's settle path (pi
+  // awaits agent_settled listeners), so it uses a short timeout and swallows
+  // transport errors — the runtime's own timeout covers the rest.
+  async turnEnded(turnMeta, { hookEventName = 'Stop' } = {}) {
+    if (!this.client || !turnMeta) return;
+    try {
+      await this.client.callTool('turn_ended', {
+        hook_event_name: hookEventName,
+        session_id: turnMeta.session_id,
+        turn_id: turnMeta.run_id,
+      }, 3000);
+    } catch {
+      // REPL gone or busy: the stop is already marked host-side; nothing to do.
     }
-    this._hasRunBefore = true;
-    return result;
+  }
+
+  // Codex stops computer use for the rest of the run on Escape; the host
+  // mirrors that here so a cell attempted after the stop surfaces the stop,
+  // not a fresh run.
+  stopRun(runId) {
+    if (runId) this._stoppedRunId = runId;
+  }
+
+  _assertNotStopped(runId) {
+    if (this._stoppedRunId && runId && this._stoppedRunId === runId) {
+      throw new Error('Computer use is stopped for this agent run (Escape pressed). The next prompt may use computer use again.');
+    }
   }
 
   async close() {
     const client = this.client;
     this.client = null;
+    this._stoppedRunId = null;
     if (client) await client.close();
   }
 }

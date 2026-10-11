@@ -7,9 +7,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
-import { SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
-import { DefaultResourceLoader } from '@earendil-works/pi-coding-agent';
-import { createAgentSession } from '@earendil-works/pi-coding-agent';
+import {
+  SessionManager,
+  SettingsManager,
+  DefaultResourceLoader,
+  DefaultPackageManager,
+  createAgentSession,
+} from '@earendil-works/pi-coding-agent';
 
 export const MODEL = {
   id: 'faux-1',
@@ -65,6 +69,7 @@ function pushScripted(stream, next) {
 // `scripts` entries are consumed by the faux streamSimple per prompt turn.
 export async function createScriptedSession({ scripts, cwd }) {
   let remaining = [...scripts];
+  const notifications = [];
   const streamSimple = (model, context, options) => {
     const stream = createAssistantMessageEventStream();
     const next = remaining.shift() ?? { kind: 'text', text: 'done' };
@@ -99,7 +104,7 @@ export async function createScriptedSession({ scripts, cwd }) {
   });
   await loader.reload();
 
-  return createAgentSession({
+  const result = await createAgentSession({
     cwd,
     agentDir: cwd,
     settingsManager: SettingsManager.inMemory({}),
@@ -107,6 +112,104 @@ export async function createScriptedSession({ scripts, cwd }) {
     sessionManager: SessionManager.inMemory(cwd),
     model: MODEL,
   });
+  const session = result.session ?? result;
+  session.notifications = notifications;
+
+  // bindExtensions fires the session_start hook that pi's CLI would send. Headless
+  // tests inject a uiContext so ctx.ui.notify can be observed.
+  await session.bindExtensions({
+    uiContext: {
+      notify: (message, level) => notifications.push({ message, level }),
+      select: async () => undefined,
+      confirm: async () => false,
+      input: async () => undefined,
+      editor: async () => undefined,
+      custom: async () => undefined,
+      onTerminalInput: () => () => {},
+      setStatus: () => {},
+      setWorkingMessage: () => {},
+      setWorkingVisible: () => {},
+      setWorkingIndicator: () => {},
+      setHiddenThinkingLabel: () => {},
+      setWidget: () => {},
+      setFooter: () => {},
+      setHeader: () => {},
+      setTitle: () => {},
+      pasteToEditor: () => {},
+      setEditorText: () => {},
+      getEditorText: () => '',
+    },
+  });
+
+  return { session, loader };
+}
+
+// Loads the extension the way `pi install` does: through package discovery on
+// the package.json pi manifest, not by importing src/extension.mjs directly.
+export async function createScriptedSessionFromPackage({ scripts, cwd }) {
+  let remaining = [...scripts];
+  const streamSimple = (model, context, options) => {
+    const stream = createAssistantMessageEventStream();
+    const next = remaining.shift() ?? { kind: 'text', text: 'done' };
+    queueMicrotask(() => {
+      const msg = pushScripted(stream, next);
+      stream.end(msg);
+    });
+    return stream;
+  };
+  const packageExtensionFactory = async (pi) => {
+    pi.registerProvider('faux', {
+      api: 'faux-s',
+      apiKey: 'test-key',
+      models: [MODEL],
+      streamSimple,
+    });
+  };
+  const repoRoot = path.resolve(import.meta.dirname, '..');
+  // SettingsManager.inMemory({ packages: [...] }) writes the packages list into
+  // InMemorySettingsStorage under scope "global"; PackageManager reads the merged
+  // settings to find the package sources. Do NOT wrap in { globalSettings: {...} }.
+  const settingsManager = SettingsManager.inMemory({
+    packages: [repoRoot],
+  });
+  const packageManager = new DefaultPackageManager({
+    cwd,
+    agentDir: cwd,
+    settingsManager,
+    builtinExtensions: [],
+  });
+  const loader = new DefaultResourceLoader({
+    cwd,
+    agentDir: cwd,
+    settingsManager,
+    packageManager,
+    extensionFactories: [packageExtensionFactory],
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    systemPrompt: 'You are a test bot.',
+  });
+  await loader.reload();
+
+  const er = loader.getExtensions();
+  if (er.errors?.length) console.warn('[harness] package errors:', er.errors);
+
+  const result = await createAgentSession({
+    cwd,
+    agentDir: cwd,
+    settingsManager: SettingsManager.inMemory({}),
+    resourceLoader: loader,
+    sessionManager: SessionManager.inMemory(cwd),
+    model: MODEL,
+  });
+  const session = result.session ?? result;
+
+  // bindExtensions fires the session_start hook that pi's CLI would send.
+  // The headless test harness must run it explicitly (print/json/rpc/tui all do).
+  await session.bindExtensions({});
+
+  return { session, loader };
 }
 
 // Collects tool results from session messages: role 'toolResult' messages.
