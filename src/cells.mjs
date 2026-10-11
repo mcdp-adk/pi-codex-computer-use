@@ -24,9 +24,15 @@ nodeRepl.write(JSON.stringify(__withWindows.map((a) => ({
 }))));
 `;
 
+// Pick a capture target the runtime will allow: the model asks for a specific
+// window; the runtime may refuse browser windows (URL policy), so the default
+// falls back to the first non-browser window, then any non-minimized window.
 export const SCREENSHOT_CELL_TPL = `
 const __all = await globalThis.__sky.list_windows();
-const __win = __all.find((w) => w.id === __WINDOW_ID__) ?? __all[0];
+const __win = __all.find((w) => w.id === __WINDOW_ID__)
+  ?? __all.find((w) => !w.isMinimized && !/edge|chrome|firefox|msedge|browser/i.test(String(w.app ?? w.appId ?? '')))
+  ?? __all.find((w) => !w.isMinimized)
+  ?? __all[0];
 if (!__win) throw new Error('no window available for screenshot');
 const __state = await globalThis.__sky.get_window_state({
   window: __win,
