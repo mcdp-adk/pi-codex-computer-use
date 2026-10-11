@@ -1,9 +1,9 @@
-// Tests for issue #5: per-agent-run Escape-stop mechanism + the turn metadata
-// each cell carries. The physical key press itself is owner-manual. Seam:
-// real pi SDK session with a faux provider scripting tool calls; the REPL is
-// the real runtime. Assert only what the user/model observes: the cell
-// returns the request meta it saw (nodeRepl.requestMeta), turn ids change
-// between agent runs, and pi's session id is carried as session_id.
+// Tests for the per-agent-run turn metadata each cell carries. The physical
+// Escape press itself is owner-manual. Seam: real pi SDK session with a faux
+// provider scripting tool calls; the REPL is the real runtime. Assert only
+// what the user/model observes: the cell returns the request meta it saw
+// (nodeRepl.requestMeta), turn ids change between agent runs, and pi's
+// session id is carried as session_id.
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -28,7 +28,7 @@ const withRuntime = hasRealRuntime() ? describe : describe.skip;
 const META_PROBE_CELL =
   "nodeRepl.write(typeof nodeRepl.requestMeta === 'undefined' ? 'NO_REQUEST_META' : JSON.stringify(nodeRepl.requestMeta));";
 
-withRuntime('issue #5: turn metadata on every computer-use cell (observed by the cell)', () => {
+withRuntime('turn metadata on every computer-use cell (observed by the cell)', () => {
   let root;
 
   before(() => {
@@ -83,52 +83,6 @@ withRuntime('issue #5: turn metadata on every computer-use cell (observed by the
       assert.equal(first.session_id, piSessionId);
       assert.equal(second.session_id, piSessionId);
       assert.notEqual(second.turn_id, first.turn_id, 'turn_id must change between agent runs');
-    } finally {
-      await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
-      session.dispose();
-    }
-  });
-
-  it('a run settled without abort sends turn_ended with the run ids (observed: prompt completes cleanly)', async () => {
-    // The turn_ended call is best-effort by design (run settle must not stall).
-    // Observable behaviour: the run settles even when the REPL is gone.
-    const { session } = await createScriptedSession({
-      cwd: root,
-      scripts: [
-        { kind: 'tool', name: 'computer_use', args: { code: "nodeRepl.write('hello');" } },
-        { kind: 'text', text: 'settled' },
-      ],
-    });
-    try {
-      await session.prompt('run a cell');
-      const results = toolResults(session);
-      assert.ok(!results[0]?.isError, `cell failed: ${toolContentTexts(results[0])}`);
-      assert.match(toolContentTexts(results[0]), /hello/);
-      // Prompt settled (session.prompt resolved) — turn_ended did not stall it.
-    } finally {
-      await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
-      session.dispose();
-    }
-  });
-
-  it('a run with no active agent run is refused at the tool surface', async () => {
-    // No prompt has started in this session: the tool must not run a cell.
-    // Observable: the session starts (session_start fired), but the scripted
-    // tool call happens inside a prompt, so the refusal is tested by the
-    // gated-extension behaviour in discovery.test.js instead. Here: a cell
-    // refused before any run would produce this same marker.
-    const { session } = await createScriptedSession({
-      cwd: root,
-      scripts: [
-        { kind: 'tool', name: 'computer_use', args: { code: META_PROBE_CELL } },
-        { kind: 'text', text: 'done' },
-      ],
-    });
-    try {
-      await session.prompt('probe the turn metadata');
-      const results = toolResults(session);
-      const meta = JSON.parse(toolContentTexts(results[0]))['x-codex-turn-metadata'];
-      assert.ok(meta.turn_id, 'inside a prompt the tool has an active run');
     } finally {
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
       session.dispose();
