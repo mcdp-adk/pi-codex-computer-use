@@ -24,7 +24,7 @@ pi install ./path/to/pi-codex-computer-use
 
 ## Use
 
-The tools stay inactive (with a single notice naming what is missing) until the Codex installation is complete; then the model can run cells in the Codex REPL. The model loads the `codex-computer-use` skill before its first cell; the skill points at the Codex guidance, confirmation policy, and sky API reference in the Codex installation, and lists where driving the runtime from pi differs from driving it inside Codex.
+The tools are not registered (with a single notice naming what is missing) until the Codex installation is complete; then the model can run cells in the Codex REPL. The model loads the `codex-computer-use` skill before its first cell; the skill points at the Codex guidance, confirmation policy, and sky API reference in the Codex installation, and lists where driving the runtime from pi differs from driving it inside Codex.
 
 ## Tests
 
