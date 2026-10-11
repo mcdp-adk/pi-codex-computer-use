@@ -19,7 +19,8 @@ const makeTempRoot = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 // Builds a CODEX_HOME shape on disk. `parts` toggles which pieces exist:
 // config, replEntry (exe + config entry + sky package + sky API ref doc),
 // marketplace (guidance/confirmations), skyPkg (the @oai/sky package under
-// the node_modules the REPL env names).
+// the node_modules the REPL env names), skyEntry (the package's export
+// entry file; off leaves a bare manifest, like a half-copied install).
 function fakeCodexHome(label, parts = {}) {
   const home = path.join(os.tmpdir(), `codex-home-${label}-${process.pid}-${Math.random().toString(36).slice(2)}`);
   fs.mkdirSync(home, { recursive: true });
@@ -39,8 +40,10 @@ function fakeCodexHome(label, parts = {}) {
         fs.writeFileSync(path.join(nm, '@oai', 'sky', 'package.json'), JSON.stringify({
           exports: { '.': './dist/index.js' },
         }));
-        fs.mkdirSync(path.join(nm, '@oai', 'sky', 'dist'), { recursive: true });
-        fs.writeFileSync(path.join(nm, '@oai', 'sky', 'dist', 'index.js'), 'export {}');
+        if (parts.skyEntry !== false) {
+          fs.mkdirSync(path.join(nm, '@oai', 'sky', 'dist'), { recursive: true });
+          fs.writeFileSync(path.join(nm, '@oai', 'sky', 'dist', 'index.js'), 'export {}');
+        }
         // Also create the sky API reference doc that discovery looks for.
         fs.writeFileSync(path.join(nm, '@oai', 'sky', 'docs', 'sky-window2-api.md'), 'api');
       }
@@ -119,6 +122,22 @@ describe('completeness discovery: tools only exist when the Codex installation i
       assert.ok(
         found.missing.some((m) => /guidance/i.test(m)),
         `missing list should name the guidance, got: ${found.missing.join('; ')}`,
+      );
+    } finally {
+      if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
+    }
+  });
+
+  it('a bare manifest without the export entry makes discovery incomplete', () => {
+    const missingHome = fakeCodexHome('no-sky-entry', { replEntry: true, marketplace: true, skyEntry: false });
+    const prev = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = missingHome;
+    try {
+      const found = discover();
+      assert.equal(found.ok, false, 'manifest without its export entry must be incomplete');
+      assert.ok(
+        found.missing.some((m) => /sky module|@oai\/sky/i.test(m)),
+        `missing list should name the sky package, got: ${found.missing.join('; ')}`,
       );
     } finally {
       if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
