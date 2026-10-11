@@ -4,7 +4,7 @@
 import { ReplHost, RESET_NOTICE } from './repl.mjs';
 import { readCodexConfig } from './config.mjs';
 import { checkSkyModule } from './sky-path.mjs';
-import { SKY_INIT_CELL, pickWindowCell, newScreenshotCell } from './cells.mjs';
+import { SKY_INIT_CELL, newScreenshotCell } from './cells.mjs';
 
 export class ComputerUse {
   constructor(opts) {
@@ -63,35 +63,6 @@ export class ComputerUse {
     }
     this.startedBefore = true;
     return this.resetNotice;
-  }
-
-  // Enumerate desktop windows through the real runtime (the discovery
-  // acceptance lists apps successfully through a migrated CODEX_HOME).
-  async listApps(opts = {}) {
-    return this.runCell(
-      `nodeRepl.write(JSON.stringify(await globalThis.sky.list_apps()));`,
-      opts,
-    );
-  }
-
-  // Screenshot a desktop window: returns { text, images } where images are the
-  // runtime's image blocks ({ data, mimeType }). The pick cell uses only real
-  // sky Window fields (id, app, title) plus activate_window, whose error
-  // advice is the runtime's own way of handling windows it cannot capture.
-  async takeScreenshot(opts = {}) {
-    await this.noticeIfRelaunched();
-    await this.ensureSky(opts);
-    const pickRun = await this.host.runCell(pickWindowCell(), { timeoutMs: 30000, ...opts });
-    if (pickRun?.isError) throw new Error(textOf(pickRun));
-    const win = JSON.parse(textOf(pickRun));
-
-    const shotRun = await this.host.runCell(newScreenshotCell(win.id), { timeoutMs: 60000, ...opts });
-    if (shotRun?.isError) throw new Error(textOf(shotRun));
-    const images = (shotRun.content ?? [])
-      .filter((c) => c.type === 'image')
-      .map((c) => ({ data: c.data, mimeType: c.mimeType }));
-    const text = textOf(shotRun);
-    return { text, images, content: shotRun.content ?? [] };
   }
 
   // Reset: close the REPL and start fresh; the next cell re-initialises sky
