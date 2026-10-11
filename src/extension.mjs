@@ -6,18 +6,52 @@ import { ComputerUse } from './computer-use.mjs';
 import { TurnMeta } from './turn-meta.mjs';
 import { discover } from './discovery.mjs';
 
-export default function (pi, deps = {}) {
-  const computerUse = deps.computerUse ?? new ComputerUse();
-  const turnMeta = deps.turnMeta ?? new TurnMeta();
-  const toolNames = ['computer_use', 'computer_use_reset'];
+export default function (pi) {
+  const computerUse = new ComputerUse();
+  const turnMeta = new TurnMeta();
 
-  // The always-visible computer_use description names the located guidance
-  // files (ticket #4). Discovery runs once so the description refers to real
-  // paths, not placeholders.
+  // Discovery runs once at factory time: it decides whether the tools are
+  // registered at all, and the description refers to real paths, not
+  // placeholders.
   const found = discover();
-  const guidanceBlurb = found.ok
-    ? ` Located: the guidance is \`${found.docs.guidance}\` (computer_use_guidance_path), the confirmation policy \`${found.docs.confirmationPolicy}\` (computer_use_confirmations_path), the sky API reference \`${found.docs.skyReference}\` (computer_use_sky_api_path).`
-    : ' Codex installation looks incomplete; the tools may be hidden and a notice names what is missing.';
+
+  if (found.ok) {
+    registerTools(pi, { computerUse, turnMeta, docs: found.docs });
+  }
+
+  pi.on('session_start', (_event, ctx) => {
+    // SSOT: the pi session id names this host session to the runtime.
+    if (ctx?.sessionManager?.getSessionId) turnMeta.setSessionId(ctx.sessionManager.getSessionId());
+    // An incomplete install registers nothing and shows one notice naming
+    // what is missing, sent through pi's ui surface.
+    if (!found.ok && ctx?.ui?.notify) ctx.ui.notify(missingNotice(found.missing), 'warning');
+  });
+
+  // Each agent run (each prompt) begins a fresh run identity; every
+  // cell in it carries the run's Codex-style turn metadata.
+  pi.on('agent_start', () => {
+    turnMeta.beginRun();
+  });
+
+  // Run over — settled normally or aborted (physical Escape aborts the run):
+  // signal turn_ended to the runtime, as Codex's own hooks do on Stop/Interrupt.
+  pi.on('agent_settled', (event) => {
+    const turnId = turnMeta.endRun();
+    if (!turnId) return;
+    const meta = { session_id: turnMeta.sessionId, turn_id: turnId };
+    return computerUse.endRun(meta, { aborted: Boolean(event?.aborted) });
+  });
+
+  // Kill the REPL process tree when the pi session ends. Returning the promise
+  // lets pi's shutdown await the teardown.
+  pi.on('session_shutdown', () => computerUse.close());
+}
+
+// The two model-facing tools, registered only when discovery found a complete
+// installation. The computer_use description names the located guidance
+// files, so the model reads the real Codex documents.
+function registerTools(pi, { computerUse, turnMeta, docs }) {
+  const guidanceBlurb = ` Located: the guidance is \`${docs.guidance}\` (computer_use_guidance_path), the confirmation policy \`${docs.confirmationPolicy}\` (computer_use_confirmations_path), the sky API reference \`${docs.skyReference}\` (computer_use_sky_api_path).`;
 
   pi.registerTool({
     name: 'computer_use',
@@ -70,50 +104,6 @@ export default function (pi, deps = {}) {
       }
     },
   });
-
-  // Ticket #3: an incomplete install hides the tools behind a single notice
-  // naming what is missing, sent through pi's ui surface.
-  let noticed = false;
-  let lastNotice = null;
-  pi.on('session_start', (_event, ctx) => {
-    // SSOT: the pi session id names this host session to the runtime.
-    if (ctx?.sessionManager?.getSessionId) turnMeta.setSessionId(ctx.sessionManager.getSessionId());
-    const found = discover();
-    if (found.ok || noticed) return;
-    noticed = true;
-    for (const name of toolNames) {
-      const previous = pi.getAllTools().find((t) => t.name === name);
-      if (previous) pi.registerTool({ ...previous, exposure: 'hidden', defaultActive: false });
-    }
-    lastNotice = missingNotice(found.missing);
-    if (ctx?.ui?.notify) ctx.ui.notify(lastNotice, 'warning');
-  });
-
-  // Ticket #5: each agent run (each prompt) begins a fresh run identity; every
-  // cell in it carries the run's Codex-style turn metadata.
-  pi.on('agent_start', () => {
-    turnMeta.beginRun();
-  });
-
-  // Run over — settled normally or aborted (physical Escape aborts the run):
-  // signal turn_ended to the runtime, as Codex's own hooks do on Stop/Interrupt.
-  pi.on('agent_settled', (event) => {
-    const turnId = turnMeta.endRun();
-    if (!turnId) return;
-    const meta = { session_id: turnMeta.sessionId, turn_id: turnId };
-    return computerUse.endRun(meta, { aborted: Boolean(event?.aborted) });
-  });
-
-  // Kill the REPL process tree when the pi session ends. Returning the promise
-  // lets pi's shutdown await the teardown.
-  pi.on('session_shutdown', () => computerUse.close());
-
-  return {
-    computerUse,
-    turnMeta,
-    get lastNotice() { return lastNotice; },
-    get lastDiscovery() { return discover(); },
-  };
 }
 
 // The notice names exactly what is missing from the Codex installation.
