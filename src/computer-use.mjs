@@ -3,13 +3,12 @@
 // never import anything from pi. Zero dependencies.
 import { ReplHost, RESET_NOTICE } from './repl.mjs';
 import { readCodexConfig } from './config.mjs';
-import { resolveSkyModule } from './sky-path.mjs';
-import { skyInitCell, pickWindowCell, newScreenshotCell } from './cells.mjs';
+import { checkSkyModule } from './sky-path.mjs';
+import { SKY_INIT_CELL, pickWindowCell, newScreenshotCell } from './cells.mjs';
 
 export class ComputerUse {
   constructor(opts) {
     this.host = opts?.host ?? new ReplHost(opts);
-    this.skyUrl = null;
     this.skyReady = false;
     // Set when the REPL was reset or relaunched; the next cell result opens
     // with a reset notice, then the flag clears.
@@ -48,8 +47,8 @@ export class ComputerUse {
     if (this.skyReady) return;
     const cfg = readCodexConfig();
     if (cfg.missing) throw new Error(`Cannot start Codex REPL: missing ${cfg.missing.join('; ')}`);
-    this.skyUrl = resolveSkyModule(cfg.env);
-    const r = await this.host.runCell(skyInitCell(this.skyUrl), { timeoutMs: 30000, signal, turnMeta });
+    checkSkyModule(cfg.env);
+    const r = await this.host.runCell(SKY_INIT_CELL, { timeoutMs: 30000, signal, turnMeta });
     if (r?.isError) throw new Error(`sky init failed: ${textOf(r)}`);
     this.skyReady = true;
   }
@@ -70,7 +69,7 @@ export class ComputerUse {
   // acceptance lists apps successfully through a migrated CODEX_HOME).
   async listApps(opts = {}) {
     return this.runCell(
-      `nodeRepl.write(JSON.stringify(await globalThis.__sky.list_apps()));`,
+      `nodeRepl.write(JSON.stringify(await globalThis.sky.list_apps()));`,
       opts,
     );
   }

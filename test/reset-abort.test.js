@@ -69,7 +69,7 @@ withRuntime('reset, crash recovery, and abort', () => {
           kind: 'tool',
           name: 'computer_use',
           args: {
-            code: "const __w = await globalThis.__sky.list_windows(); nodeRepl.write(JSON.stringify({ marker: globalThis.__t6marker ?? null, windows: __w.length }));",
+            code: "const __w = await globalThis.sky.list_windows(); nodeRepl.write(JSON.stringify({ marker: globalThis.__t6marker ?? null, windows: __w.length }));",
           },
         },
         { kind: 'text', text: 'finished' },

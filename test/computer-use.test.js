@@ -43,7 +43,7 @@ async function waitUntil(pred, timeoutMs, stepMs = 200) {
 
 // A cell enumerating the desktop apps through sky, as the model would write
 // it (the same shape ComputerUse.listApps uses).
-const LIST_APPS_CELL = `nodeRepl.write(JSON.stringify(await globalThis.__sky.list_apps()));`;
+const LIST_APPS_CELL = `nodeRepl.write(JSON.stringify(await globalThis.sky.list_apps()));`;
 
 withRuntime('run a cell in the Codex REPL from pi', () => {
   let root;
