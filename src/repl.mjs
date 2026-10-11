@@ -74,6 +74,15 @@ export class ReplHost {
       await transport.close().catch(() => {});
       throw err;
     }
+    // Crash recovery: when the REPL dies (crash, window closed, killed), drop
+    // the client so the next runCell relaunches it (a reset notice rides
+    // along, see ComputerUse.noticeIfRelaunched).
+    client.onClose(() => {
+      if (this.client === client) {
+        this.client = null;
+        this.transport = null;
+      }
+    });
     this.client = client;
     this.transport = transport;
     return true;

@@ -5,7 +5,7 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 
 import { readCodexConfig } from '../src/config.mjs';
 import { RESET_NOTICE } from '../src/repl.mjs';
@@ -22,7 +22,12 @@ const hasRealRuntime = () => {
 
 const withRuntime = hasRealRuntime() ? describe : describe.skip;
 
-const extComputerUse = () => globalThis.__extensionApi?.computerUse;
+// The extension instances pi loaded from this package.
+function extensionOf(loader) {
+  const exts = loader.getExtensions().extensions ?? [];
+  const ours = exts.find((e) => e?.api?.computerUse) ?? exts[0];
+  return ours?.api ?? null;
+}
 
 function killTree(pid) {
   return new Promise((resolve) => {
@@ -48,8 +53,21 @@ withRuntime('issue #6 acceptance: reset, recovery, and abort', () => {
     root = makeTempRoot('pi-cua-t6');
   });
 
+  function procSnapshot() {
+    const out = execSync(
+      'powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress"',
+      { encoding: 'utf8' },
+    );
+    const arr = JSON.parse(out);
+    return Array.isArray(arr) ? arr : [arr];
+  }
+
+  function replProcPids() {
+    return procSnapshot().filter((p) => /node_repl/i.test(p.Name ?? '')).map((p) => p.ProcessId);
+  }
+
   it('criterion 1: after computer_use_reset earlier globalThis values are gone and the next call can use sky', async () => {
-    const { session } = await createScriptedSession({
+    const { session, loader } = await createScriptedSession({
       cwd: root,
       scripts: [
         { kind: 'tool', name: 'computer_use', args: { code: "globalThis.__t6marker = 'here'; nodeRepl.write('stored');" } },
@@ -92,13 +110,14 @@ withRuntime('issue #6 acceptance: reset, recovery, and abort', () => {
         { kind: 'text', text: 'finished' },
       ],
     });
-    const cu = extComputerUse();
     try {
+      const baseline = replProcPids();
       await session.prompt('start the repl');
-      assert.ok(cu.host.running, 'REPL not running after first prompt');
-      const pid = cu.host.client.proc.pid;
+      const spawned = replProcPids().filter((pid) => !baseline.includes(pid));
+      assert.ok(spawned.length >= 1, 'no node_repl process appeared after the first cell');
+      const pid = spawned[spawned.length - 1];
       await killTree(pid);
-      await waitUntil(() => !cu.host.running, 5000);
+      await waitUntil(() => !replProcPids().includes(pid), 5000);
       // Session is kept; the next scripted call must auto-restart the REPL
       // and its result must start with the reset notice.
       await session.prompt('call again after the kill');
@@ -116,24 +135,24 @@ withRuntime('issue #6 acceptance: reset, recovery, and abort', () => {
   });
 
   it('criterion 3: aborting a long-running cell returns control to pi promptly', async () => {
-    const { session } = await createScriptedSession({
+    const { session, loader } = await createScriptedSession({
       cwd: root,
       scripts: [
         { kind: 'tool', name: 'computer_use', args: { code: "nodeRepl.write('cell started'); await new Promise(r => setTimeout(r, 30000)); nodeRepl.write('finished');", timeout_ms: 400000 } },
         { kind: 'text', text: 'finished' },
       ],
     });
-    const cu = extComputerUse();
     let replPid = null;
     try {
+      const baseline = replProcPids();
       const promptPromise = session.prompt('run a long cell then abort');
-      // Wait until the REPL is running and the cell is in flight, then abort.
-      await waitUntil(() => cu.host.running && cu.host.client?.proc?.pid, 30000);
-      replPid = cu.host.client.proc.pid;
+      // Wait until a fresh node_repl process (the session's REPL) exists.
+      await waitUntil(() => replProcPids().some((p) => !baseline.includes(p)), 30000);
+      replPid = replProcPids().find((p) => !baseline.includes(p));
       // The tool only resolves when the request was actually sent; wait for
       // the cell to confirm it started (its first write flushes quickly),
       // then abort while the 30s sleep is still in flight.
-      await new Promise((r) => setTimeout(r, 2000));
+      await waitUntil(() => toolResults(session).length >= 1 && toolContentTexts(toolResults(session)[0]).includes('cell started'), 30000);
       const startedAt = Date.now();
       await session.abort();
       await promptPromise;
