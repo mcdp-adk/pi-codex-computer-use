@@ -115,9 +115,11 @@ withRuntime('issue #6 acceptance: reset, recovery, and abort', () => {
       await session.prompt('start the repl');
       const spawned = replProcPids().filter((pid) => !baseline.includes(pid));
       assert.ok(spawned.length >= 1, 'no node_repl process appeared after the first cell');
-      const pid = spawned[spawned.length - 1];
-      await killTree(pid);
-      await waitUntil(() => !replProcPids().includes(pid), 5000);
+      // Kill the whole spawned set: the snapshot cannot tell the REPL top
+      // process from its own helper child, and killing only the child leaves
+      // the top process alive — the host sees no exit, no relaunch, no notice.
+      for (const pid of spawned) await killTree(pid);
+      await waitUntil(() => spawned.every((pid) => !replProcPids().includes(pid)), 5000);
       // Session is kept; the next scripted call must auto-restart the REPL
       // and its result must start with the reset notice.
       await session.prompt('call again after the kill');
