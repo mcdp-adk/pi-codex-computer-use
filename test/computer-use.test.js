@@ -1,9 +1,6 @@
-// Acceptance tests for issue #2: run a cell in the Codex REPL from pi.
+// Acceptance tests for running a cell in the Codex REPL from pi.
 // Seam: real pi SDK session with a faux provider scripting tool calls; the
 // Codex REPL and everything behind the tools is the real runtime.
-// Scripted acceptance drives the two model-facing tools (computer_use,
-// computer_use_reset); list_apps/take_screenshot live on as ComputerUse
-// methods, invoked through cells from the extension, per issue #1.
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,7 +10,7 @@ import { execSync } from 'node:child_process';
 
 import { readCodexConfig } from '../src/config.mjs';
 import { makeTempRoot, createScriptedSession, toolResults, toolContentTexts, toolContentImages } from './harness.js';
-import { LIST_APPS_CELL, newScreenshotCell } from '../src/cells.mjs';
+import { newScreenshotCell } from '../src/cells.mjs';
 
 const hasRealRuntime = () => {
   try {
@@ -35,23 +32,20 @@ function procSnapshot() {
   return Array.isArray(arr) ? arr : [arr];
 }
 
-function treeOf(pid, procs = procSnapshot()) {
-  const out = [];
-  const walk = (id) => {
-    for (const p of procs.filter((x) => x.ParentProcessId === id)) {
-      out.push(p);
-      walk(p.ProcessId);
-    }
-  };
-  const root = procs.find((p) => p.ProcessId === pid);
-  if (root) {
-    out.push(root);
-    walk(pid);
+async function waitUntil(pred, timeoutMs, stepMs = 200) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (pred()) return true;
+    await new Promise((r) => setTimeout(r, stepMs));
   }
-  return out;
+  return pred();
 }
 
-withRuntime('issue #2 acceptance: run a cell in the Codex REPL from pi', () => {
+// A cell enumerating the desktop apps through sky, as the model would write
+// it (the same shape ComputerUse.listApps uses).
+const LIST_APPS_CELL = `nodeRepl.write(JSON.stringify(await globalThis.__sky.list_apps()));`;
+
+withRuntime('run a cell in the Codex REPL from pi', () => {
   let root;
 
   before(() => {
@@ -59,7 +53,7 @@ withRuntime('issue #2 acceptance: run a cell in the Codex REPL from pi', () => {
   });
 
   it('criterion 1: scripted list-apps cell returns apps as text', async () => {
-    const { session, loader } = await createScriptedSession({
+    const { session } = await createScriptedSession({
       cwd: root,
       scripts: [
         { kind: 'tool', name: 'computer_use', args: { code: LIST_APPS_CELL } },
@@ -83,7 +77,7 @@ withRuntime('issue #2 acceptance: run a cell in the Codex REPL from pi', () => {
   });
 
   it('criterion 2: scripted screenshot cell returns an image; approval auto-granted (no prompt)', async () => {
-    const { session, loader } = await createScriptedSession({
+    const { session } = await createScriptedSession({
       cwd: root,
       scripts: [
         { kind: 'tool', name: 'computer_use', args: { code: newScreenshotCell(null) } },
@@ -106,7 +100,7 @@ withRuntime('issue #2 acceptance: run a cell in the Codex REPL from pi', () => {
   });
 
   it('criterion 3: a value stored on globalThis in one call is read back in a later call', async () => {
-    const { session, loader } = await createScriptedSession({
+    const { session } = await createScriptedSession({
       cwd: root,
       scripts: [
         { kind: 'tool', name: 'computer_use', args: { code: "globalThis.__cua_marker = 'persisted'; nodeRepl.write('stored');" } },
@@ -155,8 +149,10 @@ withRuntime('issue #2 acceptance: run a cell in the Codex REPL from pi', () => {
     }
   });
 
-  it('criterion 5: after the session ends, no process from the REPL tree remains', async () => {
-    const before = procSnapshot().filter((p) => /node_repl/i.test(p.Name ?? ''));
+  it('criterion 5: after the session ends, every descendant of the REPL process has exited', async () => {
+    const before = procSnapshot();
+    const livePids = () => new Set(procSnapshot().map((p) => p.ProcessId));
+    const beforePids = livePids();
     const { session } = await createScriptedSession({
       cwd: root,
       scripts: [
@@ -166,25 +162,35 @@ withRuntime('issue #2 acceptance: run a cell in the Codex REPL from pi', () => {
     });
     try {
       await session.prompt('go');
-      // New node_repl processes this session spawned (baseline diff).
-      const spawned = procSnapshot().filter(
-        (p) => /node_repl/i.test(p.Name ?? '') && !before.some((b) => b.ProcessId === p.ProcessId),
+      // The REPL top process(es) this session spawned (baseline diff).
+      const procsNow = procSnapshot();
+      const spawned = procsNow.filter(
+        (p) => /node_repl/i.test(p.Name ?? '') && !beforePids.has(p.ProcessId),
       );
       assert.ok(spawned.length > 0, 'no new REPL process appeared on the first call');
+      // Every descendant of the spawned REPL, whatever its name: walk the
+      // parent->child edges of the full snapshot. Name-matching alone misses
+      // helpers the runtime spawns under other names.
+      const tree = new Set();
+      const walk = (pid) => {
+        if (tree.has(pid)) return;
+        tree.add(pid);
+        for (const child of procsNow.filter((p) => p.ParentProcessId === pid)) walk(child.ProcessId);
+      };
+      for (const p of spawned) walk(p.ProcessId);
       // session.dispose() does not emit session_shutdown; the harness helper
       // does what the CLI's quit path does (runtime dispose): it emits
       // session_shutdown so the extension's handler closes the REPL tree.
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
-      await new Promise((r) => setTimeout(r, 3000));
-      const procs = procSnapshot().filter((p) => /node_repl/i.test(p.Name ?? ''));
-      const leftovers = spawned.filter((p) => procs.some((q) => q.ProcessId === p.ProcessId));
-      assert.equal(leftovers.length, 0, `REPL processes still alive: ${leftovers.map((p) => `${p.ProcessId}:${p.Name}`).join(', ')}`);
+      await waitUntil(() => [...tree].every((pid) => !livePids().has(pid)), 10000);
+      const leftovers = [...tree].filter((pid) => livePids().has(pid));
+      assert.equal(leftovers.length, 0, `REPL tree processes still alive: ${leftovers.join(', ')}`);
     } finally {
       session.dispose();
     }
   });
 
-  it('criterion 6: REPL session runs a cell with the config untouched (launch recipe itself is asserted in repl-host.test.js)', async () => {
+  it('criterion 6: REPL session runs a cell with the config untouched', async () => {
     const configPath = readCodexConfig().file;
     const before = fs.readFileSync(configPath);
     const { session } = await createScriptedSession({

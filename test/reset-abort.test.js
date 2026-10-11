@@ -1,4 +1,4 @@
-// Acceptance tests for issue #6: reset, crash recovery, and abort.
+// Acceptance tests for the reset, crash recovery, and abort criteria.
 // Seam: real pi SDK session with a faux provider scripting tool calls; the
 // Codex REPL and everything behind the tools is the real runtime.
 import { describe, it, before } from 'node:test';
@@ -22,13 +22,6 @@ const hasRealRuntime = () => {
 
 const withRuntime = hasRealRuntime() ? describe : describe.skip;
 
-// The extension instances pi loaded from this package.
-function extensionOf(loader) {
-  const exts = loader.getExtensions().extensions ?? [];
-  const ours = exts.find((e) => e?.api?.computerUse) ?? exts[0];
-  return ours?.api ?? null;
-}
-
 function killTree(pid) {
   return new Promise((resolve) => {
     const t = spawn('taskkill', ['/pid', String(pid), '/T', '/F']);
@@ -46,7 +39,7 @@ async function waitUntil(pred, timeoutMs, stepMs = 100) {
   return pred();
 }
 
-withRuntime('issue #6 acceptance: reset, recovery, and abort', () => {
+withRuntime('reset, crash recovery, and abort', () => {
   let root;
 
   before(() => {
@@ -67,7 +60,7 @@ withRuntime('issue #6 acceptance: reset, recovery, and abort', () => {
   }
 
   it('criterion 1: after computer_use_reset earlier globalThis values are gone and the next call can use sky', async () => {
-    const { session, loader } = await createScriptedSession({
+    const { session } = await createScriptedSession({
       cwd: root,
       scripts: [
         { kind: 'tool', name: 'computer_use', args: { code: "globalThis.__t6marker = 'here'; nodeRepl.write('stored');" } },
@@ -137,34 +130,45 @@ withRuntime('issue #6 acceptance: reset, recovery, and abort', () => {
   });
 
   it('criterion 3: aborting a long-running cell returns control to pi promptly', async () => {
-    const { session, loader } = await createScriptedSession({
+    const { session } = await createScriptedSession({
       cwd: root,
       scripts: [
         { kind: 'tool', name: 'computer_use', args: { code: "nodeRepl.write('cell started'); await new Promise(r => setTimeout(r, 30000)); nodeRepl.write('finished');", timeout_ms: 400000 } },
         { kind: 'text', text: 'finished' },
       ],
     });
-    let replPid = null;
+    let replProc = null;
     try {
       const baseline = replProcPids();
       const promptPromise = session.prompt('run a long cell then abort');
       // Wait until a fresh node_repl process (the session's REPL) exists.
       await waitUntil(() => replProcPids().some((p) => !baseline.includes(p)), 30000);
-      replPid = replProcPids().find((p) => !baseline.includes(p));
-      // The tool only resolves when the request was actually sent; wait for
-      // the cell to confirm it started (its first write flushes quickly),
-      // then abort while the 30s sleep is still in flight.
-      await waitUntil(() => toolResults(session).length >= 1 && toolContentTexts(toolResults(session)[0]).includes('cell started'), 30000);
-      const startedAt = Date.now();
-      await session.abort();
-      await promptPromise;
-      const elapsedMs = Date.now() - startedAt;
-      assert.ok(elapsedMs < 5000, `abort took ${elapsedMs}ms - not prompt`);
-      const results = toolResults(session);
-      assert.ok(results.length >= 1, 'no toolResult recorded before abort');
+      replProc = replProcPids().find((p) => !baseline.includes(p));
+      // Abort WHILE the tool is executing: only the SDK's tool-execution
+      // events observe execution state — the tool result is appended only
+      // when the tool finishes, so 'cell started' text can never witness a
+      // mid-flight cell. Watch tool_execution_start, let the cell enter its
+      // 30s sleep, then abort and require the prompt to return promptly.
+      let toolStarted = false;
+      const off = session.subscribe((event) => {
+        if (event.type === 'tool_execution_start' && event.toolName === 'computer_use') toolStarted = true;
+      });
+      try {
+        await waitUntil(() => toolStarted, 30000);
+        await new Promise((r) => setTimeout(r, 2000));
+        const startedAt = Date.now();
+        await session.abort();
+        await promptPromise;
+        const elapsedMs = Date.now() - startedAt;
+        assert.ok(elapsedMs < 5000, `abort took ${elapsedMs}ms - not prompt`);
+        const results = toolResults(session);
+        assert.ok(results.length >= 1, 'no toolResult recorded before abort');
+      } finally {
+        off();
+      }
     } finally {
       session.dispose();
-      if (replPid) await killTree(replPid);
+      if (replProc) await killTree(replProc);
     }
   });
 });
