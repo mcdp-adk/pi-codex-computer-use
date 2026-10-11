@@ -1,7 +1,6 @@
-// Tests for issue #4: the computer_use description routes the model to the
-// skill and the three discovered Codex documents, and the shipped skill file
-// tells the model to read them (the tool_paths tool was removed in review
-// fix 9 — the description and the skill carry the paths instead).
+// Tests for the computer_use description: it routes the model to the skill
+// and the three discovered Codex documents, and the shipped skill file tells
+// the model to read them.
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -24,7 +23,7 @@ function makePiStub() {
   };
 }
 
-describe('issue #4: guide the model with the skill and Codex guidance', () => {
+describe('guide the model with the skill and Codex guidance', () => {
   let mod, pi;
   before(async () => {
     mod = await import(extUrl().href + '?t4=' + Date.now());

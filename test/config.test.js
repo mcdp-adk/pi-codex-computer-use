@@ -1,5 +1,5 @@
 // Tests for src/config.mjs: TOML parsing of the Codex configuration.
-// smol-toml is the parser (review fix 3); readCodexConfig keeps its shape.
+// smol-toml is the parser; readCodexConfig keeps its shape.
 // Behavior is asserted through readCodexConfig with a doctored CODEX_HOME.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
