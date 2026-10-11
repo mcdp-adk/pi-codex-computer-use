@@ -10,6 +10,7 @@ import path from 'node:path';
 
 import { discover } from '../src/discovery.mjs';
 import { createScriptedSessionFromPackage, toolResults, toolContentTexts } from './harness.js';
+import { SettingsManager, DefaultPackageManager, DefaultResourceLoader } from '@earendil-works/pi-coding-agent';
 import { ComputerUse } from '../src/computer-use.mjs';
 
 const makeTempRoot = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -94,6 +95,47 @@ function fakeCodexHome(label, parts = {}) {
   }
   return home;
 }
+
+describe('skill registration: the pi manifest ships the codex-computer-use skill', () => {
+  it('the package pi manifest declares the skill directory', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '..', 'package.json'), 'utf8'));
+    assert.ok(Array.isArray(manifest.pi?.skills), 'pi manifest must declare skills: [...]');
+    assert.ok(manifest.pi.skills.length >= 1, 'at least one skill entry');
+    for (const entry of manifest.pi.skills) {
+      const p = path.resolve(import.meta.dirname, '..', entry, 'SKILL.md');
+      assert.ok(fs.existsSync(p), `skill entry ${entry} has a SKILL.md`);
+    }
+  });
+
+  it('discovery: pi packagemanager/resourceLoader discover the skill', async () => {
+    const repoRoot = path.resolve(import.meta.dirname, '..');
+    const settingsManager = SettingsManager.inMemory({ packages: [repoRoot] });
+    const packageManager = new DefaultPackageManager({ cwd: repoRoot, agentDir: repoRoot, settingsManager, builtinExtensions: [] });
+    const loader = new DefaultResourceLoader({
+      cwd: repoRoot,
+      agentDir: repoRoot,
+      settingsManager,
+      packageManager,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    await loader.reload();
+    const { skills } = loader.getSkills();
+    const skill = skills.find((s) => s.name === 'codex-computer-use');
+    assert.ok(skill, `codex-computer-use not discovered; got: ${skills.map((s) => s.name).join(', ')}`);
+    assert.ok(fs.existsSync(skill.filePath), 'skill filePath exists');
+    // The session path (harness package loader) sees the same skills.
+    const cwd = makeTempRoot('pi-cua-skill');
+    const pkg = await createScriptedSessionFromPackage({ cwd, scripts: [] });
+    try {
+      const names = pkg.loader.getSkills().skills.map((s) => s.name);
+      assert.ok(names.includes('codex-computer-use'), `skill not offered through the package session path: ${names.join(', ')}`);
+    } finally {
+      pkg.session.dispose();
+    }
+  });
+});
 
 describe('issue #3 acceptance: hide the tools when the Codex installation is incomplete', () => {
   it('discovers a complete installation with all three docs', () => {

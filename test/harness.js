@@ -184,7 +184,6 @@ export async function createScriptedSessionFromPackage({ scripts, cwd }) {
     settingsManager,
     packageManager,
     extensionFactories: [packageExtensionFactory],
-    noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
     noContextFiles: true,
