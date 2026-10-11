@@ -3,11 +3,12 @@
 // directory or a delimiter-separated list of them) plus NODE_REPL_TRUSTED_SERVICES
 // (JSON mapping service name -> module specifier, "sky" -> "@oai/sky/service").
 // The @oai/sky package's "." export is the JS API used by cells.
-// Ticket #3 will centralize discovery; keep this module tiny.
 // Host-logic file: must never import anything from pi. Zero dependencies.
 import path from 'node:path';
 import fs from 'node:fs';
-import { nodeModuleRoots } from './discovery.mjs';
+import os from 'node:os';
+import { pathToFileURL } from 'node:url';
+import { readTomlConfigDoc } from './config.mjs';
 
 const SERVICE = 'sky';
 
@@ -35,13 +36,42 @@ export function resolveSkyModule(configEnv) {
     const sub = typeof main === 'string' ? main : main?.default;
     if (!sub) continue;
     const entry = path.join(dir, sub.replace(/^\.\//, ''));
-    if (fs.existsSync(entry)) return pathToFileUrlString(entry);
+    // A file URL (not a raw path) so characters like # or % survive, and
+    // import() gets its argument as a string literal, not inline code.
+    if (fs.existsSync(entry)) return pathToFileURL(entry).href;
   }
   throw new Error(`Cannot resolve ${SERVICE}: package ${pkgName} not found under NODE_REPL_NODE_MODULE_DIRS`);
 }
 
-function pathToFileUrlString(p) {
-  let url = p.replace(/\\/g, '/');
-  if (!url.startsWith('/')) url = '/' + url;
-  return 'file://' + url;
+// All node_modules roots the REPL can resolve packages from. Accepts a
+// node_modules dir or a parent of one.
+export function nodeModuleRoots(env) {
+  return (env?.NODE_REPL_NODE_MODULE_DIRS ?? '')
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((d) => (path.basename(d) === 'node_modules' ? d : path.join(d, 'node_modules')));
+}
+
+// Windows writes the extended-length prefix \\?\ in front of long paths
+// recorded in the config; strip it so the path opens normally.
+const EXTENDED_PREFIX = String.fromCharCode(92, 92, 63, 92); // \\?\
+function stripExtendedPrefix(p) {
+  return p.startsWith(EXTENDED_PREFIX) ? p.slice(EXTENDED_PREFIX.length) : p;
+}
+
+// Marketplace and other package-source roots recorded in the Codex config
+// (e.g. the bundled marketplace the computer-use plugin ships in). Reads the
+// TOML-parsed document — the same parse src/config.mjs uses — so quoting,
+// escapes, and the \?\ extended-length prefix are handled by the parser, not
+// a regex. `[marketplaces.<name>] source = ...` (the real config's shape) and
+// a bare `[marketplace] source = ...` are both accepted.
+export function marketplaceRoots(doc) {
+  const d = doc ?? readTomlConfigDoc();
+  const tables = [d?.marketplaces, d?.marketplace].filter(
+    (t) => t && typeof t === 'object',
+  );
+  return tables
+    .flatMap((t) => (t.source !== undefined ? [t] : Object.values(t)))
+    .map((e) => (typeof e?.source === 'string' ? stripExtendedPrefix(e.source) : null))
+    .filter(Boolean);
 }

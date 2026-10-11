@@ -1,7 +1,7 @@
 // Single small module that locates the Codex node_repl MCP server config.
 // Reads the user's Codex config file (CODEX_HOME env or ~/.codex/config.toml)
 // and extracts [mcp_servers.node_repl]: command, args, env block.
-// Parsing is smol-toml's (review fix 3); no hand-rolled TOML here.
+// Parsing is smol-toml's; no hand-rolled TOML here.
 // Host-logic file: must never import anything from pi.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,6 +11,16 @@ import { parse as parseToml } from 'smol-toml';
 function configPath() {
   const home = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
   return path.join(home, 'config.toml');
+}
+
+export function readTomlConfigDoc() {
+  const file = configPath();
+  if (!fs.existsSync(file)) return {};
+  try {
+    return parseToml(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return {};
+  }
 }
 
 export function readCodexConfig() {
