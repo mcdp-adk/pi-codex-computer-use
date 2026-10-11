@@ -1,71 +1,106 @@
 // REPL host: lazily launches the Codex node_repl MCP server, runs cells in it,
 // auto-accepts app approvals (ADR 0003), and tears the process tree down.
-// Host-logic file: must never import anything from pi. Zero dependencies.
-import { spawn } from 'node:child_process';
+// Host-logic file: must never import anything from pi.
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { readCodexConfig } from './config.mjs';
-import { McpStdioClient } from './mcp-client.mjs';
+import { McpClient } from '@earendil-works/pi-mcp';
+import { StdioTransport } from '@earendil-works/pi-mcp';
 
-const CALL_TIMEOUT_MS = 120000;
+// The host's MCP request timeout rides above the cell's own timeout so the
+// runtime's own timeout always fires first (review fix 6).
+const HOST_TIMEOUT_MARGIN_MS = 10_000;
+const RUNTIME_DEFAULT_TIMEOUT_MS = 30_000;
+// turn_ended is a courtesy signal; a short timeout keeps run settle snappy.
+const TURN_ENDED_TIMEOUT_MS = 5_000;
 
 export const RESET_NOTICE = 'Codex REPL state was reset: a new REPL was started.';
+
+// Codex-style turn metadata carried by every cell (review fix 5): the key the
+// runtime reads out of tools/call params._meta, arriving as
+// nodeRepl.requestMeta inside the cell.
+export const TURN_META_KEY = 'x-codex-turn-metadata';
 
 export class ReplHost {
   constructor({ tmpDir } = {}) {
     this.tmpDir = tmpDir ?? path.join(os.tmpdir(), 'pi-codex-repl');
     this.client = null;
+    this.transport = null;
     this.stderr = '';
-    // Escape stop: set to a run id by stopRun; cells for that run refuse to
-    // run until a new run id no longer matches (the id mints per agent run).
-    this._stoppedRunId = null;
   }
 
   get running() {
-    return this.client?.proc != null;
+    return this.client != null;
   }
 
   // Launch nothing until the first cell. Returns true if the REPL started.
-  async ensureStarted() {
-    if (this.client?.proc) return true;
+  async ensureStarted({ signal } = {}) {
+    if (this.client) return true;
     const cfg = readCodexConfig();
     if (cfg.missing) {
       throw new Error(`Cannot start Codex REPL: missing ${cfg.missing.join('; ')}`);
     }
+    // ADR 0002 launch recipe: the configured environment merged over the
+    // current one, minus the three variables that route through the running
+    // Codex app, plus the analytics-off switch, with temporary directories
+    // pointed at a writable location. Nothing is persisted.
+    const env = { ...process.env, ...cfg.env };
+    for (const k of ['SKY_CUA_NATIVE_PIPE', 'SKY_CUA_NATIVE_PIPE_DIRECTORY', 'CODEX_CLI_PATH']) {
+      delete env[k];
+    }
+    env.NODE_REPL_DISABLE_ANALYTICS = '1';
     fs.mkdirSync(this.tmpDir, { recursive: true });
-    const client = new McpStdioClient({ name: 'pi-codex-computer-use', version: '0.1.0' });
+    env.TMP = this.tmpDir;
+    env.TEMP = this.tmpDir;
+
+    const transport = new StdioTransport({ command: cfg.command, args: cfg.args ?? [], env });
+    const client = new McpClient({
+      name: 'pi-codex-computer-use',
+      version: '0.1.0',
+      capabilities: { elicitation: { form: {} } },
+    });
     client.setRequestHandler('elicitation/create', async () => {
       // ADR 0003: grant every app approval with empty content.
       return { action: 'accept', content: {} };
     });
-    client.onStderr = (chunk) => {
-      this.stderr = (this.stderr + chunk).slice(-4000);
-    };
-    await client.start({
-      command: cfg.command,
-      args: cfg.args,
-      env: client.buildSpawnEnv(cfg.env),
-    });
+    // connect() starts the transport and runs the initialize handshake. Per
+    // the MCP spec initialize cannot be cancelled, so instead of passing the
+    // signal down we race the handshake against it and kill the newborn
+    // process tree on abort — aborting the first call returns promptly (fix 2).
+    try {
+      await raceAbort(client.connect(transport), signal);
+    } catch (err) {
+      await transport.close().catch(() => {});
+      throw err;
+    }
     this.client = client;
+    this.transport = transport;
     return true;
   }
 
   // Run one cell (JavaScript) in the REPL. Returns the MCP result
   // { content: [...], isError } with text/image blocks passed through.
-  // Per `turnMeta`, the cell script opens by publishing the run's Codex-style
-  // turn metadata on globalThis (node_repl's `js` tool does not accept a
-  // metadata argument — Codex's hooks pass it to `turn_ended` instead).
+  // Per `turnMeta`, the call carries the run's Codex-style turn metadata in
+  // params._meta; the runtime surfaces it to the cell as nodeRepl.requestMeta
+  // (review fix 5 — no globalThis prefix needed).
   // Per `signal`, pi's AbortSignal cancels the MCP request promptly instead
   // of waiting for the cell to finish.
-  async runCell(code, { timeoutMs = CALL_TIMEOUT_MS, signal, turnMeta } = {}) {
-    await this.ensureStarted();
-    const cell = turnMeta
-      ? `globalThis.__cua_turn_metadata = ${JSON.stringify({ session_id: turnMeta.session_id, run_id: turnMeta.run_id })};\n${code}`
-      : code;
-    const mcpArgs = { code: cell, timeout_ms: timeoutMs };
-    const result = await this.client.callTool('js', mcpArgs, timeoutMs + 5000, signal);
-    return result;
+  async runCell(code, { timeoutMs, signal, turnMeta } = {}) {
+    await this.ensureStarted({ signal });
+    const cellTimeoutMs = timeoutMs ?? RUNTIME_DEFAULT_TIMEOUT_MS;
+    const arguments_ = { code };
+    if (timeoutMs != null) arguments_.timeout_ms = timeoutMs;
+    const params = {
+      name: 'js',
+      arguments: arguments_,
+      ...(turnMeta ? { _meta: { [TURN_META_KEY]: { session_id: turnMeta.session_id, turn_id: turnMeta.turn_id } } } : {}),
+    };
+    // The host never times out earlier than the cell itself (fix 6).
+    return this.client.request('tools/call', params, {
+      signal,
+      timeoutMs: cellTimeoutMs + HOST_TIMEOUT_MARGIN_MS,
+    });
   }
 
   // Signal the runtime that a turn has ended (normal or aborted), the way
@@ -76,33 +111,46 @@ export class ReplHost {
   async turnEnded(turnMeta, { hookEventName = 'Stop' } = {}) {
     if (!this.client || !turnMeta) return;
     try {
-      await this.client.callTool('turn_ended', {
-        hook_event_name: hookEventName,
-        session_id: turnMeta.session_id,
-        turn_id: turnMeta.run_id,
-      }, 3000);
+      await this.client.request('tools/call', {
+        name: 'turn_ended',
+        arguments: {
+          hook_event_name: hookEventName,
+          session_id: turnMeta.session_id,
+          turn_id: turnMeta.turn_id,
+        },
+      }, { timeoutMs: TURN_ENDED_TIMEOUT_MS });
     } catch {
-      // REPL gone or busy: the stop is already marked host-side; nothing to do.
-    }
-  }
-
-  // Codex stops computer use for the rest of the run on Escape; the host
-  // mirrors that here so a cell attempted after the stop surfaces the stop,
-  // not a fresh run.
-  stopRun(runId) {
-    if (runId) this._stoppedRunId = runId;
-  }
-
-  _assertNotStopped(runId) {
-    if (this._stoppedRunId && runId && this._stoppedRunId === runId) {
-      throw new Error('Computer use is stopped for this agent run (Escape pressed). The next prompt may use computer use again.');
+      // REPL gone or busy: nothing to do — the signal is best-effort.
     }
   }
 
   async close() {
     const client = this.client;
+    const transport = this.transport;
     this.client = null;
-    this._stoppedRunId = null;
-    if (client) await client.close();
+    this.transport = null;
+    this.stderr = '';
+    if (client) {
+      // client.close() tears down in-flight requests and closes the
+      // transport, which kills the REPL process tree.
+      await client.close();
+    } else if (transport) {
+      await transport.close().catch(() => {});
+    }
   }
+}
+
+// Reject when `signal` aborts; otherwise settle with `promise`. Cleans the
+// listener up on the promise path.
+function raceAbort(promise, signal) {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason ?? new Error('aborted'));
+    if (signal.aborted) return onAbort();
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (v) => { signal.removeEventListener('abort', onAbort); resolve(v); },
+      (e) => { signal.removeEventListener('abort', onAbort); reject(e); },
+    );
+  });
 }
