@@ -178,7 +178,7 @@ describe('completeness discovery: tools only exist when the Codex installation i
     }
   });
 
-  it('valid home through a package session: computer_use runs against the real runtime and carries turn metadata', async () => {
+  it('valid home through a package session: computer_use runs against the real runtime and carries turn metadata', async (t) => {
     const cwdHome = fakeCodexHome('valid', { replEntry: true, marketplace: true });
     const prev = process.env.CODEX_HOME;
     // The fake home satisfies discovery (config entry + marketplace docs),
@@ -187,19 +187,29 @@ describe('completeness discovery: tools only exist when the Codex installation i
     // runtime: point command at the real node_repl and NODE_REPL_NODE_MODULE_DIRS
     // at the real node_modules, so the runtime lists apps successfully.
     const real = readCodexConfig();
-    if (real.missing?.length || !real.command || !real.env?.NODE_REPL_NODE_MODULE_DIRS) return;
+    if (real.missing?.length || !real.command || !real.env?.NODE_REPL_NODE_MODULE_DIRS) {
+      // Skip visibly: this case needs a real runtime; a silent return would
+      // look like a vacuous pass.
+      t.skip('needs a real Codex runtime to drive');
+      return;
+    }
     const nm = String(real.env.NODE_REPL_NODE_MODULE_DIRS).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
     const command = String(real.command).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
+    // The runtime resolves @oai/sky/service only from a trusted module
+    // directory, which the real config names via NODE_REPL_TRUSTED_CODE_PATHS;
+    // a migrated home carries the real env, so copy it too.
+    const tcp = String(real.env.NODE_REPL_TRUSTED_CODE_PATHS).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
     const cfgToml = fs.readFileSync(path.join(cwdHome, 'config.toml'), 'utf8');
     fs.writeFileSync(path.join(cwdHome, 'config.toml'), cfgToml
       .replace(/command = '.*'/, `command = '${command}'`)
-      .replace(/NODE_REPL_NODE_MODULE_DIRS = '.*'/, `NODE_REPL_NODE_MODULE_DIRS = '${nm}'`));
+      .replace(/NODE_REPL_NODE_MODULE_DIRS = '.*'/, `NODE_REPL_NODE_MODULE_DIRS = '${nm}'\nNODE_REPL_TRUSTED_CODE_PATHS = '${tcp}'`));
     process.env.CODEX_HOME = cwdHome;
     const cwd = makeTempRoot('pi-cua-test-3-ok');
     try {
       const { session } = await createScriptedSessionFromPackage({
         cwd,
         scripts: [
+          { kind: 'tool', name: 'computer_use', args: { code: 'nodeRepl.write(JSON.stringify(await globalThis.sky.list_apps()).slice(0, 80));' } },
           { kind: 'tool', name: 'computer_use', args: { code: "nodeRepl.write(JSON.stringify(nodeRepl.requestMeta ?? 'NO_META'));" } },
           { kind: 'text', text: 'done' },
         ],
@@ -210,13 +220,20 @@ describe('completeness discovery: tools only exist when the Codex installation i
         assert.ok(toolNames.includes('computer_use'), 'computer_use visible when the install is complete');
 
         const results = toolResults(session);
-        assert.ok(!results[0]?.isError, `cell failed: ${toolContentTexts(results[0])}`);
-        const text = toolContentTexts(results[0]);
+        assert.equal(results.length, 2, `expected 2 toolResults, got ${results.length}`);
+        // Criterion 3: a call that lists apps succeeds against this home.
+        assert.ok(!results[0]?.isError, `list-apps cell failed: ${toolContentTexts(results[0])}`);
+        assert.match(
+          toolContentTexts(results[0]),
+          /id|title|displayName|app/i,
+          `list-apps cell returned no app text: ${toolContentTexts(results[0]).slice(0, 200)}`,
+        );
+        const text = toolContentTexts(results[1]);
         // The runtime may echo non-JSON lines before the cell's write; take
         // the last line that looks like the meta object.
         const jsonLine = text.split('\n').filter((l) => l.trim().startsWith('{')).pop();
         const meta = jsonLine ? JSON.parse(jsonLine)['x-codex-turn-metadata'] : undefined;
-        assert.ok(meta, `cell carried no turn metadata: ${text.slice(0, 200)}`);
+        assert.ok(meta, `second cell carried no turn metadata: ${text.slice(0, 200)}`);
         assert.ok(meta.turn_id, 'cell carries a per-run turn id');
         assert.equal(meta.session_id, session.sessionManager.getSessionId(), 'session_id is pi session id');
       } finally {
