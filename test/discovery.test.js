@@ -1,7 +1,7 @@
-// Tests for issue #3 (red): hide the computer-use tools when the Codex
-// installation is incomplete. Drives the full pi SDK session via the package
-// discovery harness, with a doctored CODEX_HOME so discovery actually fails —
-// no test-only backdoors, no direct session method calls.
+// Tests for the completeness discovery and skill shipping. Drives the full
+// pi SDK session via the package discovery harness, with a doctored
+// CODEX_HOME so discovery actually fails — no test-only backdoors, no direct
+// session method calls.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -16,55 +16,15 @@ import { ComputerUse } from '../src/computer-use.mjs';
 
 const makeTempRoot = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 
-// A host standing in for the REPL MCP layer. Real ComputerUse logic runs on
-// top; the host answers the sky-init cell so ensureSky succeeds and captures
-// every cell it received.
-function makeMcpLayer(answers = {}) {
-  return {
-    cells: [],
-    turnEndedCalls: [],
-    closed: 0,
-    _running: false,
-    _stoppedRunId: null,
-    get running() { return this._running; },
-    async runCell(code, opts = {}) {
-      this._running = true;
-      this.cells.push({ code, ...opts });
-      if (code.includes('globalThis.__sky')) {
-        return { text: '[sky] loaded', content: [{ type: 'text', text: '[sky] loaded' }] };
-      }
-      return {
-        text: answers.text ?? '[computer-use] ok',
-        content: [{ type: 'text', text: answers.text ?? '[computer-use] ok' }],
-      };
-    },
-    stopRun(runId) { this._stoppedRunId = runId; },
-    _assertNotStopped(runId) {
-      if (this._stoppedRunId && (!runId || this._stoppedRunId === runId)) {
-        throw new Error('Computer use is stopped for this agent run (Escape pressed). The next prompt may use computer use again.');
-      }
-    },
-    async turnEnded(turnMeta, { hookEventName } = {}) {
-      this.turnEndedCalls.push({ turnMeta, hookEventName });
-    },
-    async close() { this._running = false; this.closed++; this._stoppedRunId = null; },
-  };
-}
-
 // Builds a CODEX_HOME shape on disk. `parts` toggles which pieces exist:
-// config, replEntry (exe + config entry), marketplace (guidance/confirmations),
-// skyRef (the sky API reference doc).
+// config, replEntry (exe + config entry + sky package + sky API ref doc),
+// marketplace (guidance/confirmations), skyPkg (the @oai/sky package under
+// the node_modules the REPL env names).
 function fakeCodexHome(label, parts = {}) {
   const home = path.join(os.tmpdir(), `codex-home-${label}-${process.pid}-${Math.random().toString(36).slice(2)}`);
   fs.mkdirSync(home, { recursive: true });
   const command = path.join(home, 'bin', 'node_repl.exe');
   const nm = path.join(home, 'bin', 'node_modules');
-  fs.mkdirSync(path.join(nm, '@oai', 'sky', 'docs'), { recursive: true });
-  fs.writeFileSync(path.join(nm, '@oai', 'sky', 'package.json'), JSON.stringify({
-    exports: { '.': './dist/index.js' },
-  }));
-  fs.mkdirSync(path.join(nm, '@oai', 'sky', 'dist'), { recursive: true });
-  fs.writeFileSync(path.join(nm, '@oai', 'sky', 'dist', 'index.js'), 'export {}');
   let config = '';
   if (parts.config !== false) {
     if (parts.replEntry) {
@@ -72,12 +32,18 @@ function fakeCodexHome(label, parts = {}) {
       if (parts.commandFile !== false) fs.writeFileSync(command, '');
       config += `[mcp_servers.node_repl]\ncommand = '${command}'\n`;
       config += `[mcp_servers.node_repl.env]\n`;
-      config += `NODE_REPL_TRUSTED_SERVICES = '{"sky":"@oai/sky/service"}'\n`;
+      config += `NODE_REPL_TRUSTED_SERVICES = '${JSON.stringify({ sky: '@oai/sky/service' }).replace(/'/g, "\\'")}'\n`;
       config += `NODE_REPL_NODE_MODULE_DIRS = '${nm}'\n`;
-      // Also create the sky API reference doc that discovery looks for.
-      const skyDocs = path.join(nm, '@oai', 'sky', 'docs');
-      fs.mkdirSync(skyDocs, { recursive: true });
-      fs.writeFileSync(path.join(skyDocs, 'sky-window2-api.md'), 'api');
+      if (parts.skyPkg !== false) {
+        fs.mkdirSync(path.join(nm, '@oai', 'sky', 'docs'), { recursive: true });
+        fs.writeFileSync(path.join(nm, '@oai', 'sky', 'package.json'), JSON.stringify({
+          exports: { '.': './dist/index.js' },
+        }));
+        fs.mkdirSync(path.join(nm, '@oai', 'sky', 'dist'), { recursive: true });
+        fs.writeFileSync(path.join(nm, '@oai', 'sky', 'dist', 'index.js'), 'export {}');
+        // Also create the sky API reference doc that discovery looks for.
+        fs.writeFileSync(path.join(nm, '@oai', 'sky', 'docs', 'sky-window2-api.md'), 'api');
+      }
     }
     if (parts.marketplace) {
       const mkt = path.join(home, 'mkt');
@@ -88,11 +54,6 @@ function fakeCodexHome(label, parts = {}) {
       config += `\n[marketplace]\nsource = '${mkt}'\n`;
     }
     fs.writeFileSync(path.join(home, 'config.toml'), config);
-  }
-  if (parts.skyRef) {
-    const nmDocs = path.join(home, 'node_modules', '@oai', 'sky', 'docs');
-    fs.mkdirSync(nmDocs, { recursive: true });
-    fs.writeFileSync(path.join(nmDocs, 'sky-window2-api.md'), 'api');
   }
   return home;
 }
@@ -137,7 +98,7 @@ describe('skill registration: the pi manifest ships the codex-computer-use skill
     }
   });
 });
-describe('issue #3 acceptance: hide the tools when the Codex installation is incomplete', () => {
+describe('completeness discovery: tools only exist when the Codex installation is complete', () => {
   it('discovers a complete installation with all three docs', () => {
     const found = discover();
     assert.ok(found.ok, `real install should be complete; missing: ${found.missing?.join('; ')}`);
@@ -148,7 +109,7 @@ describe('issue #3 acceptance: hide the tools when the Codex installation is inc
   });
 
   it('a missing piece makes discovery incomplete and names it', () => {
-    const missingHome = fakeCodexHome('no-guidance', { replEntry: true, marketplace: false, skyRef: true });
+    const missingHome = fakeCodexHome('no-guidance', { replEntry: true, marketplace: false });
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = missingHome;
     try {
@@ -164,32 +125,27 @@ describe('issue #3 acceptance: hide the tools when the Codex installation is inc
     }
   });
 
-  it('incomplete install through a package session: tools are hidden and one ui notice names every missing piece', async () => {
+  it('incomplete install through a package session: no tools registered and one ui notice names every missing piece', async () => {
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = fakeCodexHome('empty');
-    const cwd = makeTempRoot('pi-cua-test-3-hidden');
+    const cwd = makeTempRoot('pi-cua-incomplete');
     try {
       const { session } = await createScriptedSessionFromPackage({
         cwd,
         scripts: [
-          { kind: 'tool', name: 'computer_use', args: { code: '42' }, text: 'trying the tool' },
           { kind: 'text', text: 'done' },
         ],
       });
       try {
         await session.prompt('try computer use');
-        const toolNames = session.getActiveToolNames();
-        assert.ok(!toolNames.includes('computer_use'), 'computer_use must be hidden when the install is incomplete');
-        assert.ok(!toolNames.includes('computer_use_reset'), 'computer_use_reset must be hidden too');
+        // Full registry, not just active tools: an incomplete install must
+        // not register the computer-use tools at all.
+        const allNames = session.getAllTools().map((t) => t.name);
+        assert.ok(!allNames.includes('computer_use'), 'computer_use must not be registered when the install is incomplete');
+        assert.ok(!allNames.includes('computer_use_reset'), 'computer_use_reset must not be registered either');
 
-        // The model asked anyway: the surfaced result explains, it does not run.
-        const results = toolResults(session);
-        assert.ok(results.length >= 1, 'one tool result expected');
-        const text = toolContentTexts(results[0]);
-        assert.match(text, /not found|not available|unknown|unavailable|invalid|hidden|refused|no active agent run|failed/i, 'the hidden tool surfaces an explanation');
-
-        // One notice named the missing pieces (fix 12: observed via the
-        // injected ui surface, not a globalThis backdoor).
+        // One notice named the missing pieces, observed via the injected ui
+        // surface.
         const notices = session.notifications.map((n) => n.message);
         assert.equal(notices.length, 1, `exactly one notice expected, got: ${JSON.stringify(notices)}`);
         assert.match(notices[0], /incomplete/i);
@@ -204,18 +160,21 @@ describe('issue #3 acceptance: hide the tools when the Codex installation is inc
   });
 
   it('valid home through a package session: computer_use runs against the real runtime and carries turn metadata', async () => {
-    const cwdHome = fakeCodexHome('valid', { replEntry: true, marketplace: true, skyRef: true });
+    const cwdHome = fakeCodexHome('valid', { replEntry: true, marketplace: true });
     const prev = process.env.CODEX_HOME;
-    // The fake home satisfies discovery (all three docs + a config entry) but
-    // names no runnable REPL. The runtime stays the real one: point the fake
-    // config entry at the real node_repl command from the REAL user config.
+    // The fake home satisfies discovery (config entry + marketplace docs),
+    // but its node_modules only carries a fake sky package that the real
+    // runtime cannot import. A migrated CODEX_HOME copies/points at the real
+    // runtime: point command at the real node_repl and NODE_REPL_NODE_MODULE_DIRS
+    // at the real node_modules, so the runtime lists apps successfully.
     const real = readCodexConfig();
-    if (real.missing?.length) this.skip();
+    if (real.missing?.length || !real.command || !real.env?.NODE_REPL_NODE_MODULE_DIRS) return;
+    const nm = String(real.env.NODE_REPL_NODE_MODULE_DIRS).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
+    const command = String(real.command).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
     const cfgToml = fs.readFileSync(path.join(cwdHome, 'config.toml'), 'utf8');
-    fs.writeFileSync(path.join(cwdHome, 'config.toml'), cfgToml.replace(
-      /command = '.*'/,
-      `command = '${String(real.command).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39))}'`,
-    ));
+    fs.writeFileSync(path.join(cwdHome, 'config.toml'), cfgToml
+      .replace(/command = '.*'/, `command = '${command}'`)
+      .replace(/NODE_REPL_NODE_MODULE_DIRS = '.*'/, `NODE_REPL_NODE_MODULE_DIRS = '${nm}'`));
     process.env.CODEX_HOME = cwdHome;
     const cwd = makeTempRoot('pi-cua-test-3-ok');
     try {

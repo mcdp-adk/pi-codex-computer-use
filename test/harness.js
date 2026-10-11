@@ -67,85 +67,15 @@ function pushScripted(stream, next) {
 
 // Creates a pi session whose provider scripts the given responses in order.
 // `scripts` entries are consumed by the faux streamSimple per prompt turn.
+// The extension is loaded the way pi loads packages (package discovery on
+// the package.json pi manifest) — never by importing src/extension.mjs
+// directly, so the seam is exactly pi's.
 export async function createScriptedSession({ scripts, cwd }) {
-  let remaining = [...scripts];
-  const notifications = [];
-  const streamSimple = (model, context, options) => {
-    const stream = createAssistantMessageEventStream();
-    const next = remaining.shift() ?? { kind: 'text', text: 'done' };
-    queueMicrotask(() => {
-      const msg = pushScripted(stream, next);
-      stream.end(msg);
-    });
-    return stream;
-  };
-
-  const extensionFactory = async (pi) => {
-    pi.registerProvider('faux', {
-      api: 'faux-s',
-      apiKey: 'test-key',
-      models: [MODEL],
-      streamSimple,
-    });
-    const mod = await import(pathToFileURL(path.resolve(import.meta.dirname, '..', 'src', 'extension.mjs')));
-    mod.default(pi);
-  };
-
-  const loader = new DefaultResourceLoader({
-    cwd,
-    agentDir: cwd,
-    settingsManager: SettingsManager.inMemory({}),
-    extensionFactories: [extensionFactory],
-    noSkills: true,
-    noPromptTemplates: true,
-    noThemes: true,
-    noContextFiles: true,
-    systemPrompt: 'You are a test bot.',
-  });
-  await loader.reload();
-
-  const result = await createAgentSession({
-    cwd,
-    agentDir: cwd,
-    settingsManager: SettingsManager.inMemory({}),
-    resourceLoader: loader,
-    sessionManager: SessionManager.inMemory(cwd),
-    model: MODEL,
-  });
-  const session = result.session ?? result;
-  session.notifications = notifications;
-
-  // bindExtensions fires the session_start hook that pi's CLI would send. Headless
-  // tests inject a uiContext so ctx.ui.notify can be observed.
-  await session.bindExtensions({
-    uiContext: {
-      notify: (message, level) => notifications.push({ message, level }),
-      select: async () => undefined,
-      confirm: async () => false,
-      input: async () => undefined,
-      editor: async () => undefined,
-      custom: async () => undefined,
-      onTerminalInput: () => () => {},
-      setStatus: () => {},
-      setWorkingMessage: () => {},
-      setWorkingVisible: () => {},
-      setWorkingIndicator: () => {},
-      setHiddenThinkingLabel: () => {},
-      setWidget: () => {},
-      setFooter: () => {},
-      setHeader: () => {},
-      setTitle: () => {},
-      pasteToEditor: () => {},
-      setEditorText: () => {},
-      getEditorText: () => '',
-    },
-  });
-
-  return { session, loader };
+  return createScriptedSessionFromPackage({ scripts, cwd });
 }
 
-// Loads the extension the way `pi install` does: through package discovery on
-// the package.json pi manifest, not by importing src/extension.mjs directly.
+// The package-loading path itself: pi discovers the repo as a package and
+// runs its extension factory from the manifest.
 export async function createScriptedSessionFromPackage({ scripts, cwd }) {
   let remaining = [...scripts];
   const notifications = [];
@@ -202,8 +132,8 @@ export async function createScriptedSessionFromPackage({ scripts, cwd }) {
     model: MODEL,
   });
   const session = result.session ?? result;
-  // Headless tests observe notices through the injected ui surface, like the
-  // direct-extension path does (review fix 12: no globalThis backdoors).
+  // Headless tests observe notices through the injected ui surface, like
+  // pi's CLI does.
   session.notifications = notifications;
   // bindExtensions fires the session_start hook that pi's CLI would send.
   // The headless test harness must run it explicitly (print/json/rpc/tui all
