@@ -22,6 +22,8 @@ const hasRealRuntime = () => {
 
 const withRuntime = hasRealRuntime() ? describe : describe.skip;
 
+const extComputerUse = () => globalThis.__extensionApi?.computerUse;
+
 function killTree(pid) {
   return new Promise((resolve) => {
     const t = spawn('taskkill', ['/pid', String(pid), '/T', '/F']);
@@ -75,6 +77,7 @@ withRuntime('issue #6 acceptance: reset, recovery, and abort', () => {
       assert.equal(parsed.marker, null, 'value survived reset on globalThis');
       assert.ok(parsed.windows >= 0, 'sky was not ready after reset (list_windows failed to arrive)');
     } finally {
+      await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
       session.dispose();
     }
   });
@@ -89,8 +92,7 @@ withRuntime('issue #6 acceptance: reset, recovery, and abort', () => {
         { kind: 'text', text: 'finished' },
       ],
     });
-    const mod = await import('../src/extension.mjs');
-    const cu = mod.computerUse;
+    const cu = extComputerUse();
     try {
       await session.prompt('start the repl');
       assert.ok(cu.host.running, 'REPL not running after first prompt');
@@ -105,12 +107,14 @@ withRuntime('issue #6 acceptance: reset, recovery, and abort', () => {
         ?? results[results.length - 1];
       assert.ok(!second.isError, `second cell failed: ${toolContentTexts(second)}`);
       const text = toolContentTexts(second);
-      assert.ok(text.startsWith('Codex REPL state was reset'), `result did not start with reset notice: ${text.slice(0, 120)}`);
+      assert.ok(text.startsWith(RESET_NOTICE), `result did not start with reset notice: ${text.slice(0, 120)}`);
       assert.ok(text.includes('second'), `cell output missing after notice: ${text.slice(0, 200)}`);
     } finally {
+      await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
       session.dispose();
     }
   });
+
   it('criterion 3: aborting a long-running cell returns control to pi promptly', async () => {
     const { session } = await createScriptedSession({
       cwd: root,
@@ -119,8 +123,7 @@ withRuntime('issue #6 acceptance: reset, recovery, and abort', () => {
         { kind: 'text', text: 'finished' },
       ],
     });
-    const mod = await import('../src/extension.mjs');
-    const cu = mod.computerUse;
+    const cu = extComputerUse();
     let replPid = null;
     try {
       const promptPromise = session.prompt('run a long cell then abort');
@@ -135,7 +138,7 @@ withRuntime('issue #6 acceptance: reset, recovery, and abort', () => {
       await session.abort();
       await promptPromise;
       const elapsedMs = Date.now() - startedAt;
-      assert.ok(elapsedMs < 15000, `abort took ${elapsedMs}ms - not prompt`);
+      assert.ok(elapsedMs < 5000, `abort took ${elapsedMs}ms - not prompt`);
       const results = toolResults(session);
       assert.ok(results.length >= 1, 'no toolResult recorded before abort');
     } finally {
