@@ -35,11 +35,14 @@ export default function (pi) {
 
   // Run over — settled normally or aborted (physical Escape aborts the run):
   // signal turn_ended to the runtime, as Codex's own hooks do on Stop/Interrupt.
+  // Fire-and-forget: pi awaits agent_settled listeners, so an awaited goodbye
+  // (the REPL can be busy with the just-aborted cell for up to 5s) would stall
+  // the run's settle; the host itself swallows its transport errors.
   pi.on('agent_settled', (event) => {
     const turnId = turnMeta.endRun();
     if (!turnId) return;
     const meta = { session_id: turnMeta.sessionId, turn_id: turnId };
-    return computerUse.endRun(meta, { aborted: Boolean(event?.aborted) });
+    computerUse.endRun(meta, { aborted: Boolean(event?.aborted) }).catch(() => {});
   });
 
   // Kill the REPL process tree when the pi session ends. Returning the promise
