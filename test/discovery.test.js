@@ -178,6 +178,39 @@ describe('completeness discovery: tools only exist when the Codex installation i
     }
   });
 
+  it('missing guidance through a package session: no tools registered and one ui notice names the guidance', async () => {
+    const prev = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = fakeCodexHome('no-guidance', { replEntry: true, marketplace: false });
+    const cwd = makeTempRoot('pi-cua-no-guidance');
+    try {
+      const { session } = await createScriptedSessionFromPackage({
+        cwd,
+        scripts: [
+          { kind: 'text', text: 'done' },
+        ],
+      });
+      try {
+        await session.prompt('try computer use');
+        // Full registry, not just active tools: a missing guidance must keep
+        // the computer-use tools out of the registry entirely.
+        const allNames = session.getAllTools().map((t) => t.name);
+        assert.ok(!allNames.includes('computer_use'), 'computer_use must not be registered when the guidance is missing');
+        assert.ok(!allNames.includes('computer_use_reset'), 'computer_use_reset must not be registered either');
+
+        // One notice naming the missing guidance, observed via the injected
+        // ui surface.
+        const notices = session.notifications.map((n) => n.message);
+        assert.equal(notices.length, 1, `exactly one notice expected, got: ${JSON.stringify(notices)}`);
+        assert.match(notices[0], /guidance/i, `notice should name the guidance, got: ${notices[0]}`);
+      } finally {
+        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+        session.dispose();
+      }
+    } finally {
+      if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
+    }
+  });
+
   it('valid home through a package session: computer_use runs against the real runtime and carries turn metadata', async (t) => {
     const cwdHome = fakeCodexHome('valid', { replEntry: true, marketplace: true });
     const prev = process.env.CODEX_HOME;
