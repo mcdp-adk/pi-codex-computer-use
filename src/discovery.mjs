@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readCodexConfig } from './config.mjs';
-import { resolveSkyModule, marketplaceRoots, nodeModuleRoots } from './sky-path.mjs';
+import { checkSkyModule, marketplaceRoots, nodeModuleRoots } from './sky-path.mjs';
 
 const SKY_DOC = path.join('@oai', 'sky', 'docs', 'sky-window2-api.md');
 const PLUGIN_DOCS = path.join('plugins', 'computer-use', 'docs');
@@ -68,11 +68,11 @@ export function discover() {
   const missing = [...(repl.missing ?? [])];
   let docs = {};
   if (!repl.missing) {
-    // The sky module: resolve it exactly as ensureSky will, so a missing
+    // The sky module: check it exists exactly as ensureSky will, so a missing
     // NODE_REPL_TRUSTED_SERVICES entry or package is named here, before any
     // tool runs.
     try {
-      resolveSkyModule(repl.env);
+      checkSkyModule(repl.env);
     } catch (err) {
       missing.push(`sky module (${err.message})`);
     }
