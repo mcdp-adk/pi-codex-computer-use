@@ -25,17 +25,52 @@ function skySpecifier(configEnv) {
 }
 
 // A discovery check: the @oai/sky package exists under one of the module
-// directories the REPL resolves packages from. Throws naming what is missing,
-// so an incomplete install registers no tools and names the gap.
+// directories the REPL resolves packages from, and the entry its manifest's
+// `main` or `exports` names is on disk — a manifest-only shell (a half-copied
+// install) is incomplete. Throws naming what is missing, so an incomplete
+// install registers no tools and names the gap.
 export function checkSkyModule(configEnv) {
   const pkgName = skySpecifier(configEnv);
   const candidateRoots = nodeModuleRoots(configEnv).map((root) =>
     path.join(root, pkgName));
 
   for (const dir of candidateRoots) {
-    if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
+    const manifestPath = path.join(dir, 'package.json');
+    if (!fs.existsSync(manifestPath)) continue;
+    let pkg;
+    try {
+      pkg = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    } catch {
+      throw new Error(`Cannot resolve ${SERVICE}: ${pkgName}'s package.json is not valid JSON`);
+    }
+    let entry;
+    try {
+      entry = pkgEntryPath(pkg);
+    } catch (err) {
+      throw new Error(`Cannot resolve ${SERVICE}: ${pkgName}'s package.json names no usable entry (${err.message})`);
+    }
+    if (!fs.existsSync(path.join(dir, entry))) {
+      throw new Error(`Cannot resolve ${SERVICE}: ${pkgName}'s entry file ${entry} is missing`);
+    }
+    return dir;
   }
   throw new Error(`Cannot resolve ${SERVICE}: package ${pkgName} not found under NODE_REPL_NODE_MODULE_DIRS`);
+}
+
+// The on-disk entry path a package's manifest names: the bare `main`, or the
+// `.` export's value (a string, or the `default` of a conditional map). The
+// export's leading `./` matches the manifest's own paths.
+function pkgEntryPath(pkg) {
+  if (typeof pkg.main === 'string') return pkg.main;
+  const exp = pkg.exports?.['.'] ?? pkg.exports;
+  if (typeof exp === 'string') return exp;
+  const dot = pkg.exports?.['.'];
+  if (typeof dot === 'string') return dot;
+  if (dot && typeof dot === 'object') {
+    const dflt = dot.default ?? Object.values(dot).find((v) => typeof v === 'string');
+    if (typeof dflt === 'string') return dflt;
+  }
+  throw new Error('no main and no "." export');
 }
 
 // All node_modules roots the REPL can resolve packages from. Accepts a
