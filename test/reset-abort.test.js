@@ -22,6 +22,18 @@ const hasRealRuntime = () => {
 
 const withRuntime = hasRealRuntime() ? describe : describe.skip;
 
+// The long cell writes a marker file (the externally observable start
+// signal the abort test waits for), then sleeps. __cellRoot__ is substituted
+// with the session's temp cwd; no process/globalThis state escapes.
+const LONG_CELL_TPL = `
+const __fs = await import('node:fs');
+const __path = await import('node:path');
+const __marker = __path.join(__cellRoot__, 'long-cell-running.marker');
+__fs.writeFileSync(__marker, String(Date.now()));
+await new Promise((r) => setTimeout(r, 60000));
+nodeRepl.write('long cell finished');
+`;
+
 function killTree(pid) {
   return new Promise((resolve) => {
     const t = spawn('taskkill', ['/pid', String(pid), '/T', '/F']);
@@ -133,47 +145,74 @@ withRuntime('reset, crash recovery, and abort', () => {
     const { session } = await createScriptedSession({
       cwd: root,
       scripts: [
-        { kind: 'tool', name: 'computer_use', args: { code: "nodeRepl.write('cell started'); await new Promise(r => setTimeout(r, 30000)); nodeRepl.write('finished');", timeout_ms: 400000 } },
+        // Faux scripts are consumed per agent-loop continuation, not per
+        // prompt: warmup tool + end-of-turn text belong to the warmup prompt,
+        // the long cell + its text belong to the aborted prompt.
+        { kind: 'tool', name: 'computer_use', args: { code: "nodeRepl.write('warmup done');" } },
+        { kind: 'text', text: 'warmup done' },
+        { kind: 'tool', name: 'computer_use', args: { code: LONG_CELL_TPL.replace('__cellRoot__', JSON.stringify(root)), timeout_ms: 400000 } },
         { kind: 'text', text: 'finished' },
       ],
     });
     let replProc = null;
     try {
       const baseline = replProcPids();
-      // Subscribe BEFORE the prompt: tool_execution_start fires once, while
-      // the tool is already executing — a subscription made after the wait
-      // below would miss it.
+      // Warm the REPL first in the SAME session: the long cell must fight an
+      // already-initialized REPL, not race its MCP + sky init.
+      await session.prompt('warm the repl');
+      const warmResults = toolResults(session);
+      assert.ok(!warmResults[0]?.isError, `warmup cell failed: ${toolContentTexts(warmResults[0])}`);
+      const baselineAfterWarmup = baseline;
+      replProc = (await waitUntil(
+        () => replProcPids().find((p) => !baseline.includes(p)) ?? null,
+        30000,
+      )) ?? null;
+      assert.ok(replProc, 'no node_repl process appeared after the warmup cell');
+
       let toolStarted = false;
+      let toolDone = false;
       const off = session.subscribe((event) => {
         if (event.type === 'tool_execution_start' && event.toolName === 'computer_use') toolStarted = true;
+        if (event.type === 'tool_execution_end' && event.toolName === 'computer_use') toolDone = true;
       });
-      const promptPromise = session.prompt('run a long cell then abort');
-      // Wait until a fresh node_repl process (the session's REPL) exists.
-      const replAppeared = await waitUntil(() => replProcPids().some((p) => !baseline.includes(p)), 30000);
-      assert.ok(replAppeared, 'no node_repl process appeared within 30s');
-      replProc = replProcPids().find((p) => !baseline.includes(p));
-      // Abort WHILE the tool is executing: only the SDK's tool-execution
-      // events observe execution state — the tool result is appended only
-      // when the tool finishes, so 'cell started' text can never witness a
-      // mid-flight cell. Let the cell enter its 30s sleep, then abort and
-      // require the prompt to return promptly.
+      // The long cell writes a marker file BEFORE sleeping: the externally
+      // observable, repl-side signal that the cell is actually running —
+      // tool_execution_start fires before MCP init would even finish, and
+      // the marker only exists once the cell body is deep in its sleep.
+      const marker = path.join(root, 'long-cell-running.marker');
       try {
-        const sawToolStart = await waitUntil(() => toolStarted, 30000);
-        assert.ok(sawToolStart, 'tool_execution_start never fired');
-        await new Promise((r) => setTimeout(r, 500));
+        const promptPromise = session.prompt('run the long cell then abort');
+        const sawStart = await waitUntil(() => toolStarted, 30000);
+        assert.ok(sawStart, 'tool_execution_start never fired');
+        assert.ok(
+          await waitUntil(() => fs.existsSync(marker), 30000),
+          'the long cell never wrote its marker - it was not running when we aborted',
+        );
+        assert.ok(!toolDone, 'the long cell already finished before the abort');
         const startedAt = Date.now();
         await session.abort();
         await promptPromise;
         const elapsedMs = Date.now() - startedAt;
         assert.ok(elapsedMs < 2000, `abort took ${elapsedMs}ms - not prompt`);
+        // The aborted cell must come back as a cancellation error, not a
+        // silent success — only the tool result observes that.
         const results = toolResults(session);
-        assert.ok(results.length >= 1, 'no toolResult recorded before abort');
+        const long = results.find((r) => toolContentTexts(r).includes('MCP request aborted')) ?? results[results.length - 1];
+        assert.ok(long, 'no tool result recorded for the long cell');
+        assert.ok(long.isError, `aborted cell returned success: ${toolContentTexts(long)}`);
+        assert.match(toolContentTexts(long), /abort|cancel/i, `error text is not a cancellation: ${toolContentTexts(long)}`);
       } finally {
         off();
+        fs.rmSync(marker, { force: true });
       }
     } finally {
+      // Shutdown first: the extension's close() tears down the in-flight cell
+      // request and kills the REPL tree — without it a sleeping cell keeps the
+      // runner alive until the cell's timeout.
+      await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
       session.dispose();
       if (replProc) await killTree(replProc);
+      await waitUntil(() => !replProcPids().includes(replProc), 10000);
     }
   });
 });
