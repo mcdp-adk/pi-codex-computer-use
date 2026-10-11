@@ -140,27 +140,32 @@ withRuntime('reset, crash recovery, and abort', () => {
     let replProc = null;
     try {
       const baseline = replProcPids();
-      const promptPromise = session.prompt('run a long cell then abort');
-      // Wait until a fresh node_repl process (the session's REPL) exists.
-      await waitUntil(() => replProcPids().some((p) => !baseline.includes(p)), 30000);
-      replProc = replProcPids().find((p) => !baseline.includes(p));
-      // Abort WHILE the tool is executing: only the SDK's tool-execution
-      // events observe execution state — the tool result is appended only
-      // when the tool finishes, so 'cell started' text can never witness a
-      // mid-flight cell. Watch tool_execution_start, let the cell enter its
-      // 30s sleep, then abort and require the prompt to return promptly.
+      // Subscribe BEFORE the prompt: tool_execution_start fires once, while
+      // the tool is already executing — a subscription made after the wait
+      // below would miss it.
       let toolStarted = false;
       const off = session.subscribe((event) => {
         if (event.type === 'tool_execution_start' && event.toolName === 'computer_use') toolStarted = true;
       });
+      const promptPromise = session.prompt('run a long cell then abort');
+      // Wait until a fresh node_repl process (the session's REPL) exists.
+      const replAppeared = await waitUntil(() => replProcPids().some((p) => !baseline.includes(p)), 30000);
+      assert.ok(replAppeared, 'no node_repl process appeared within 30s');
+      replProc = replProcPids().find((p) => !baseline.includes(p));
+      // Abort WHILE the tool is executing: only the SDK's tool-execution
+      // events observe execution state — the tool result is appended only
+      // when the tool finishes, so 'cell started' text can never witness a
+      // mid-flight cell. Let the cell enter its 30s sleep, then abort and
+      // require the prompt to return promptly.
       try {
-        await waitUntil(() => toolStarted, 30000);
-        await new Promise((r) => setTimeout(r, 2000));
+        const sawToolStart = await waitUntil(() => toolStarted, 30000);
+        assert.ok(sawToolStart, 'tool_execution_start never fired');
+        await new Promise((r) => setTimeout(r, 500));
         const startedAt = Date.now();
         await session.abort();
         await promptPromise;
         const elapsedMs = Date.now() - startedAt;
-        assert.ok(elapsedMs < 5000, `abort took ${elapsedMs}ms - not prompt`);
+        assert.ok(elapsedMs < 2000, `abort took ${elapsedMs}ms - not prompt`);
         const results = toolResults(session);
         assert.ok(results.length >= 1, 'no toolResult recorded before abort');
       } finally {
