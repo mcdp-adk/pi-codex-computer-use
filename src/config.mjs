@@ -50,9 +50,31 @@ export function parse(toml) {
   return cfg;
 }
 
+// Comment block sits above `parse` (the TOML reader); unquote/parseArray
+// below are its helpers. Double-quoted TOML strings process \-escapes (so
+// "C:\\x" becomes C:\x and "{\"k\":\"v\"}" becomes {"k":"v"} — both
+// JSON-parseable after unquoting).
 function unquote(s) {
   const m = s.match(/^'(.*)'$/) ?? s.match(/^"(.*)"$/);
-  return m ? m[1] : s;
+  if (!m) return s;
+  const inner = m[1];
+  // Single-quoted TOML strings are literal; no escape processing.
+  if (s[0] === "'") return inner;
+  // Double-quoted: process the standard TOML escapes.
+  return inner.replace(/\\(.)/g, (whole, ch) => {
+    switch (ch) {
+      case 'n': return '\n';
+      case 't': return '\t';
+      case 'r': return '\r';
+      case '\\': return '\\';
+      case '"': return '"';
+      case "'": return "'";
+      case 'b': return '\b';
+      case 'f': return '\f';
+      case 'u': return '\\u'; // not implemented; keep for parse error visibility
+      default: return ch;
+    }
+  });
 }
 
 function parseArray(s) {
