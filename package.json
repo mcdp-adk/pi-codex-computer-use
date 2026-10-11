@@ -5,7 +5,12 @@
   "type": "module",
   "main": "src/extension.mjs",
   "pi": {
-    "extensions": ["src/extension.mjs"]
+    "extensions": [
+      "src/extension.mjs"
+    ],
+    "skills": [
+      "skills/codex-computer-use"
+    ]
   },
   "files": [
     "src",
@@ -24,7 +29,8 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "dependencies": {
-    "@earendil-works/pi-mcp": "^1.1.0"
+    "@earendil-works/pi-mcp": "^1.1.0",
+    "smol-toml": "^1.9.1"
   },
   "private": true
 }
