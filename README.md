@@ -20,11 +20,11 @@ npm install
 pi install ./path/to/pi-codex-computer-use
 ```
 
-`pi install` adds the package to your settings; the extension registers the `computer_use` / `computer_use_reset` / `list_apps` / `take_screenshot` / `computer_use_tool_paths` tools, and the `codex-computer-use` skill becomes available to the model.
+`pi install` adds the package to your settings; the extension registers the `computer_use` / `computer_use_reset` tools, and the `codex-computer-use` skill becomes available to the model.
 
 ## Use
 
-The tools stay inactive (with a single notice naming what is missing) until the Codex installation is complete; then the model can run cells in the Codex REPL. Read the loaded guidance first — `computer_use_tool_paths` reports the on-disk locations of the located Codex guidance, confirmation policy, and sky API reference.
+The tools stay inactive (with a single notice naming what is missing) until the Codex installation is complete; then the model can run cells in the Codex REPL. The model loads the `codex-computer-use` skill before its first cell; the skill points at the Codex guidance, confirmation policy, and sky API reference in the Codex installation, and lists where driving the runtime from pi differs from driving it inside Codex.
 
 ## Tests
 
