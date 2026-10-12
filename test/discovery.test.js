@@ -2,9 +2,9 @@
 // session: the discovery decides which tools the session registers and what
 // its computer_use description names, so the sessions here assert exactly
 // that. A fake Codex installation, a temporary directory named by CODEX_HOME
-// and written by the test, sits behind the session seam (story 22: the test
+// and written by the test, sits behind the session seam: the test
 // spells out Codex's file layout itself, not borrowing the package's
-// constants). No test imports a module of the package.
+// constants. No test imports a module of the package.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

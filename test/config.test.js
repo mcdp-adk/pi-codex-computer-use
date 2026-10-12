@@ -2,9 +2,9 @@
 // through a pi session: a temporary directory named by CODEX_HOME carries a
 // config.toml the test writes itself — the package's parsing is observed
 // through what the session does with it. The real runtime runs the cell; the
-// fake home sits behind the session seam (test-audit authoring gate: the
-// home, not the parsing function, is the independent statement of Codex's
-// file layout). Needs the real runtime on this machine and skips visibly
+// fake home sits behind the session seam: the home, not the parsing
+// function, is the independent statement of Codex's file
+// layout. Needs the real runtime on this machine and skips visibly
 // without it, like every runtime-gated suite.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
