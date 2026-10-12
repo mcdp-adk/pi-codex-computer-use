@@ -1,5 +1,7 @@
 # pi-codex-computer-use
 
+Read `CONTRIBUTING.md` before writing an issue, a commit, a pull request, or a comment.
+
 ## Agent skills
 
 - **Issue tracker**: GitHub Issues for `mcdp-adk/pi-codex-computer-use`, through the `gh` CLI. See `docs/agents/issue-tracker.md`.
@@ -25,19 +27,3 @@ Ignore `.worktrees/` and `.local/` through `.git/info/exclude`, not `.gitignore`
 
 - The repo ships no Codex files; the Codex runtime is located on the user's machine at run time.
 - Captures and logs stay local, unnamed by path.
-
-### Acceptance criteria
-
-- Only the owner rewords an acceptance criterion; an agent proposes the new wording in conversation.
-- Every ticked acceptance criterion has evidence.
-- An issue closes only with every criterion ticked.
-
-### Evidence
-
-- Evidence separates what was observed from its suspected cause, and marks a cause not reproduced as a hypothesis.
-- Evidence cites commits reachable from the PR or `main`, and states its results on GitHub.
-
-### Pull requests
-
-- Changes reach `main` through a PR unless the owner asks for a direct commit.
-- A PR for an issue starts with `Closes #N` when it finishes the issue, or `Refs #N` when it doesn't.
