@@ -135,13 +135,14 @@ function skyModuleRoots(env) {
     .map((d) => (path.basename(d) === 'node_modules' ? d : path.join(d, 'node_modules')));
 }
 
-// The on-disk entry path a package's manifest names: a bare-string `exports`,
-// the bare `main`, or the `.` export's value (a string, or the `default` of a
-// conditional map). The export's leading `./` matches the manifest's own paths.
+// The on-disk entry path a package's manifest names: the bare `main` first,
+// then the `.` export's value (a string, or the `default` of a conditional
+// map) — or, when there is no `.` key, the bare `exports` string itself.
+// The export's leading `./` matches the manifest's own paths.
 function manifestEntryPath(pkg) {
-  const exp = pkg.exports;
-  if (typeof exp === 'string') return exp;
   if (typeof pkg.main === 'string') return pkg.main;
+  const exp = pkg.exports?.['.'] ?? pkg.exports;
+  if (typeof exp === 'string') return exp;
   const dot = pkg.exports?.['.'];
   if (typeof dot === 'string') return dot;
   if (dot && typeof dot === 'object') {
