@@ -54,17 +54,17 @@ export default function (pi) {
 // installation. The computer_use description names the located guidance
 // files, so the model reads the real Codex documents.
 function registerTools(pi, { computerUse, turnMeta, docs }) {
-  const guidanceBlurb = ` Located Codex documents — load the skill (skill: codex-computer-use) and read these before the first cell: guidance \`${docs.guidance}\` (computer_use_guidance_path), confirmation policy \`${docs.confirmationPolicy}\` (computer_use_confirmations_path), sky API reference \`${docs.skyReference}\` (computer_use_sky_api_path).`;
+  const guidanceBlurb = ` Codex documents: guidance \`${docs.guidance}\` (computer_use_guidance_path), confirmation policy \`${docs.confirmationPolicy}\` (computer_use_confirmations_path), sky API reference \`${docs.skyReference}\` (computer_use_sky_api_path).`;
 
   pi.registerTool({
     name: 'computer_use',
     label: 'Computer use',
     description:
-      'Run a JavaScript cell in the Codex computer-use REPL, whose sky API observes and operates Windows desktop apps. Returns what the cell produces: text passed to nodeRepl.write as text, and images passed to nodeRepl.emitImage as images. Cell semantics: top-level await works, bindings and values on globalThis persist across cells, only dynamic imports are available, and there is no `process`. The runtime applies its own default timeout; pass timeout_ms to override it for a slow cell. sky is already initialised. Load the codex-computer-use skill and read the Codex documents it names before the first cell.' + guidanceBlurb,
+      'Run a JavaScript cell in the Codex computer-use REPL, whose sky API observes and operates Windows desktop apps. Returns what the cell produces: text passed to nodeRepl.write as text, and images passed to nodeRepl.emitImage as images. Cell semantics: top-level await works, bindings and values on globalThis persist across cells, only dynamic imports are available, and there is no `process`. The runtime applies its own default timeout; pass timeout_ms to override it for a slow cell. sky is already initialised. Before the first cell, load the codex-computer-use skill and read the Codex documents below.' + guidanceBlurb,
     parameters: {
       type: 'object',
       properties: {
-        code: { type: 'string', description: 'JavaScript to run, as the skill and guidance describe' },
+        code: { type: 'string', description: 'JavaScript to run in the REPL' },
         timeout_ms: { type: 'number', description: 'Cell timeout in ms (optional, defaults to the runtime’s own)' },
       },
       required: ['code'],
@@ -92,7 +92,7 @@ function registerTools(pi, { computerUse, turnMeta, docs }) {
   pi.registerTool({
     name: 'computer_use_reset',
     label: 'Computer use: reset',
-    description: 'Reset the Codex computer-use REPL when it stops responding or you want a clean slate. Drops every binding and value on globalThis; the next computer_use cell runs in a fresh REPL with sky initialised again, and its result notes the reset.',
+    description: 'Reset the Codex computer-use REPL. Drops every binding and value on globalThis; the next computer_use cell runs in a fresh REPL with sky initialised again, and its result notes the reset.',
     parameters: { type: 'object', properties: {} },
     exposure: 'model-only',
     executionMode: 'sequential',
