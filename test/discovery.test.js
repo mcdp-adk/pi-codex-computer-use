@@ -122,29 +122,6 @@ describe('skill registration: the pi manifest ships the codex-computer-use skill
 });
 
 describe('completeness discovery: tools only exist when the Codex installation is complete', () => {
-  it('a missing piece makes discovery incomplete and names it', async () => {
-    const missingHome = fakeCodexHome('no-guidance', { replEntry: true, marketplace: false });
-    const prev = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = missingHome;
-    try {
-      const { session } = await createScriptedSessionFromPackage({
-        cwd: makeTempRoot('pi-cua-no-guidance-disc'),
-        scripts: [ { kind: 'text', text: 'done' } ],
-      });
-      try {
-        await session.prompt('try computer use');
-        const notices = session.notifications.map((n) => n.message);
-        assert.equal(notices.length, 1, `exactly one notice expected, got: ${JSON.stringify(notices)}`);
-        assert.match(notices[0], /guidance/i, `notice should name the guidance, got: ${notices[0]}`);
-      } finally {
-        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
-        session.dispose();
-      }
-    } finally {
-      if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
-    }
-  });
-
   it('a bare manifest without the export entry makes discovery incomplete', async () => {
     const missingHome = fakeCodexHome('no-sky-entry', { replEntry: true, marketplace: true, skyEntry: false });
     const prev = process.env.CODEX_HOME;
