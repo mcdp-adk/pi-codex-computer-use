@@ -7,7 +7,7 @@
 // Every fact is observed through the session seam; no test imports a module
 // of the package. Needs the real runtime on this machine and skips visibly
 // without it (criterion 2 of issue #11).
-import { describe, it } from 'node:test';
+import { it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {

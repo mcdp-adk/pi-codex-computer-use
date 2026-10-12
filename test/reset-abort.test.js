@@ -1,7 +1,7 @@
 // Acceptance tests for the reset, crash recovery, and abort criteria.
 // Seam: real pi SDK session with a faux provider scripting tool calls; the
 // Codex REPL and everything behind the tools is the real runtime.
-import { describe, it } from 'node:test';
+import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';

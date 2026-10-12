@@ -24,7 +24,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { AuthStorage } from '../node_modules/@earendil-works/pi-coding-agent/dist/core/auth-storage.js';
 
-export const MODEL = {
+const MODEL = {
   id: 'faux-1',
   name: 'Faux 1',
   api: 'faux-s',
@@ -102,7 +102,7 @@ export async function createScriptedSession({ scripts, cwd }) {
 export async function createScriptedSessionFromPackage({ scripts, cwd }) {
   let remaining = [...scripts];
   const notifications = [];
-  const streamSimple = (model, context, options) => {
+  const streamSimple = () => {
     const stream = createAssistantMessageEventStream();
     const next = remaining.shift() ?? { kind: 'text', text: 'done' };
     queueMicrotask(() => {

@@ -1,7 +1,7 @@
 // Acceptance tests for running a cell in the Codex REPL from pi.
 // Seam: real pi SDK session with a faux provider scripting tool calls; the
 // Codex REPL and everything behind the tools is the real runtime.
-import { describe, it } from 'node:test';
+import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -143,7 +143,6 @@ withRealRuntime('run a cell in the Codex REPL from pi', () => {
   });
 
   it('criterion 5: after the session ends, every descendant of the REPL process has exited', async () => {
-    const before = procSnapshot();
     const livePids = () => new Set(procSnapshot().map((p) => p.ProcessId));
     const beforePids = livePids();
     const { session } = await createScriptedSession({

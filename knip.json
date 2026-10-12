@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "test/*.test.js"
+  ],
+  "project": [
+    "src/**/*.mjs",
+    "test/**/*.{js,mjs}"
+  ],
+  "includeEntryExports": true
+}
