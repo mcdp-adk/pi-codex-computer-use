@@ -7,17 +7,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { readCodexConfig } from '../src/config.mjs';
-import { makeTempRoot, removeTempRoot } from './harness.js';
+import { makeTempRoot } from './harness.js';
 
-function codexHomeWith(t, toml) {
-  const home = makeTempRoot('codex-home-cfg', t);
+function codexHomeWith(toml) {
+  const home = makeTempRoot('codex-home-cfg');
   fs.writeFileSync(path.join(home, 'config.toml'), toml);
   return home;
 }
 
 describe('config: TOML parsing of the Codex configuration', () => {
-  it('readCodexConfig extracts the node_repl entry, ignoring other tables', (t) => {
-    const home = codexHomeWith(t, `
+  it('readCodexConfig extracts the node_repl entry, ignoring other tables', () => {
+    const home = codexHomeWith(`
 model = "gpt-6.1-sol"
 command = "top-level-trap"
 [desktop]
@@ -49,8 +49,8 @@ command = "other-trap"
     }
   });
 
-  it('readCodexConfig reports a missing config file', (t) => {
-    const home = makeTempRoot('codex-home-missing', t);
+  it('readCodexConfig reports a missing config file', () => {
+    const home = makeTempRoot('codex-home-missing');
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = home;
     try {
@@ -61,8 +61,8 @@ command = "other-trap"
     }
   });
 
-  it('readCodexConfig reports an unparseable config file instead of throwing', (t) => {
-    const home = codexHomeWith(t, 'this is = not toml ==\n[');
+  it('readCodexConfig reports an unparseable config file instead of throwing', () => {
+    const home = codexHomeWith('this is = not toml ==\n[');
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = home;
     try {
@@ -70,7 +70,6 @@ command = "other-trap"
       assert.match(cfg.missing?.[0] ?? '', /parsed/i, 'parse failure becomes a missing reason, not a throw');
     } finally {
       if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
-      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 });

@@ -5,11 +5,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { discover } from '../src/discovery.mjs';
 import { readCodexConfig } from '../src/config.mjs';
-import { createScriptedSessionFromPackage, makeTempRoot, removeTempRoot, toolResults, toolContentTexts } from './harness.js';
+import { createScriptedSessionFromPackage, makeTempRoot, toolResults, toolContentTexts } from './harness.js';
 import { SettingsManager, DefaultPackageManager, DefaultResourceLoader } from '@earendil-works/pi-coding-agent';
 
 // Builds a CODEX_HOME shape on disk. `parts` toggles which pieces exist:
@@ -17,11 +16,10 @@ import { SettingsManager, DefaultPackageManager, DefaultResourceLoader } from '@
 // marketplace (guidance/confirmations), skyPkg (the @oai/sky package under
 // the node_modules the REPL env names), skyEntry (the package's export
 // entry file; off leaves a bare manifest, like a half-copied install).
-// `t.after` removes the directory; every test removes what it creates.
-function fakeCodexHome(t, label, parts = {}) {
-  const home = path.join(os.tmpdir(), `codex-home-${label}-${process.pid}-${Math.random().toString(36).slice(2)}`);
-  fs.mkdirSync(home, { recursive: true });
-  t.after(() => removeTempRoot(home));
+// The process-exit hook in test/harness.js removes the directory; every test
+// creates its directories only through makeTempRoot.
+function fakeCodexHome(label, parts = {}) {
+  const home = makeTempRoot(`codex-home-${label}`);
   const command = path.join(home, 'bin', 'node_repl.exe');
   const nm = path.join(home, 'bin', 'node_modules');
   let config = '';
@@ -70,7 +68,7 @@ describe('skill registration: the pi manifest ships the codex-computer-use skill
     }
   });
 
-  it('discovery: pi packagemanager/resourceLoader discover the skill', async (t) => {
+  it('discovery: pi packagemanager/resourceLoader discover the skill', async () => {
     const repoRoot = path.resolve(import.meta.dirname, '..');
     const settingsManager = SettingsManager.inMemory({ packages: [repoRoot] });
     const packageManager = new DefaultPackageManager({ cwd: repoRoot, agentDir: repoRoot, settingsManager, builtinExtensions: [] });
@@ -89,7 +87,7 @@ describe('skill registration: the pi manifest ships the codex-computer-use skill
     assert.ok(skill, `codex-computer-use not discovered; got: ${skills.map((s) => s.name).join(', ')}`);
     assert.ok(fs.existsSync(skill.filePath), 'skill filePath exists');
     // The session path (harness package loader) sees the same skills.
-    const cwd = makeTempRoot('pi-cua-skill', t);
+    const cwd = makeTempRoot('pi-cua-skill');
     const pkg = await createScriptedSessionFromPackage({ cwd, scripts: [] });
     try {
       const names = pkg.loader.getSkills().skills.map((s) => s.name);
@@ -126,8 +124,8 @@ describe('completeness discovery: tools only exist when the Codex installation i
     }
   });
 
-  it('a bare manifest without the export entry makes discovery incomplete', (t) => {
-    const missingHome = fakeCodexHome(t, 'no-sky-entry', { replEntry: true, marketplace: true, skyEntry: false });
+  it('a bare manifest without the export entry makes discovery incomplete', () => {
+    const missingHome = fakeCodexHome('no-sky-entry', { replEntry: true, marketplace: true, skyEntry: false });
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = missingHome;
     try {
@@ -142,10 +140,10 @@ describe('completeness discovery: tools only exist when the Codex installation i
     }
   });
 
-  it('incomplete install through a package session: no tools registered and one ui notice names every missing piece', async (t) => {
+  it('incomplete install through a package session: no tools registered and one ui notice names every missing piece', async () => {
     const prev = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = fakeCodexHome(t, 'empty');
-    const cwd = makeTempRoot('pi-cua-incomplete', t);
+    process.env.CODEX_HOME = fakeCodexHome('empty');
+    const cwd = makeTempRoot('pi-cua-incomplete');
     try {
       const { session } = await createScriptedSessionFromPackage({
         cwd,
@@ -176,10 +174,10 @@ describe('completeness discovery: tools only exist when the Codex installation i
     }
   });
 
-  it('missing guidance through a package session: no tools registered and one ui notice names the guidance', async (t) => {
+  it('missing guidance through a package session: no tools registered and one ui notice names the guidance', async () => {
     const prev = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = fakeCodexHome(t, 'no-guidance', { replEntry: true, marketplace: false });
-    const cwd = makeTempRoot('pi-cua-no-guidance', t);
+    process.env.CODEX_HOME = fakeCodexHome('no-guidance', { replEntry: true, marketplace: false });
+    const cwd = makeTempRoot('pi-cua-no-guidance');
     try {
       const { session } = await createScriptedSessionFromPackage({
         cwd,
@@ -210,20 +208,15 @@ describe('completeness discovery: tools only exist when the Codex installation i
   });
 
   it('valid home through a package session: computer_use runs against the real runtime and carries turn metadata', async (t) => {
-    const cwdHome = fakeCodexHome(t, 'valid', { replEntry: true, marketplace: true });
-    const prev = process.env.CODEX_HOME;
-    // The fake home satisfies discovery (config entry + marketplace docs),
-    // but its node_modules only carries a fake sky package that the real
-    // runtime cannot import. A migrated CODEX_HOME copies/points at the real
-    // runtime: point command at the real node_repl and NODE_REPL_NODE_MODULE_DIRS
-    // at the real node_modules, so the runtime lists apps successfully.
+    // Skip visibly before building anything: this case needs a real runtime;
+    // a silent return would look like a vacuous pass.
     const real = readCodexConfig();
     if (real.missing?.length || !real.command || !real.env?.NODE_REPL_NODE_MODULE_DIRS) {
-      // Skip visibly: this case needs a real runtime; a silent return would
-      // look like a vacuous pass.
       t.skip('needs a real Codex runtime to drive');
       return;
     }
+    const cwdHome = fakeCodexHome('valid', { replEntry: true, marketplace: true });
+    const prev = process.env.CODEX_HOME;
     const nm = String(real.env.NODE_REPL_NODE_MODULE_DIRS).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
     const command = String(real.command).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
     // The runtime resolves @oai/sky/service only from a trusted module
@@ -235,7 +228,7 @@ describe('completeness discovery: tools only exist when the Codex installation i
       .replace(/command = '.*'/, `command = '${command}'`)
       .replace(/NODE_REPL_NODE_MODULE_DIRS = '.*'/, `NODE_REPL_NODE_MODULE_DIRS = '${nm}'\nNODE_REPL_TRUSTED_CODE_PATHS = '${tcp}'`));
     process.env.CODEX_HOME = cwdHome;
-    const cwd = makeTempRoot('pi-cua-test-3-ok', t);
+    const cwd = makeTempRoot('pi-cua-test-3-ok');
     try {
       const { session } = await createScriptedSessionFromPackage({
         cwd,

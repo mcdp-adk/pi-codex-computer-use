@@ -5,7 +5,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import {
   SessionManager,
@@ -42,19 +41,24 @@ const MSG_BASE = () => ({
   persist: true,
 });
 
-// Create a temp directory under os.tmpdir(). With a node:test context,
-// registers its removal after the test — every test removes what it creates.
-export function makeTempRoot(label = 'pi-cua-test', t) {
-  const root = path.join(os.tmpdir(), `${label}-${process.pid}-${Math.random().toString(36).slice(2)}`);
-  fs.mkdirSync(root, { recursive: true });
-  if (t) t.after(() => removeTempRoot(root));
-  return root;
-}
+// Every test directory lives under one per-process root, removed once at
+// process exit — not per test. On Windows the REPL can still hold handles on
+// a directory right after session_shutdown, so the removal retries.
+const TEST_ROOT = path.join(os.tmpdir(), `pi-codex-computer-use-test-${process.pid}`);
+let exitHookRegistered = false;
 
-// Remove a directory makeTempRoot created. On Windows the REPL can still hold
-// handles on it right after session_shutdown, so retry before giving up.
-export function removeTempRoot(dir) {
-  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+// Create a temp directory under the process's per-run test root. No node:test
+// context, no per-test removal: one `process.on('exit')` removes the root.
+export function makeTempRoot(label = 'pi-cua-test') {
+  const root = path.join(TEST_ROOT, `${label}-${Math.random().toString(36).slice(2)}`);
+  fs.mkdirSync(root, { recursive: true });
+  if (!exitHookRegistered) {
+    exitHookRegistered = true;
+    process.on('exit', () => {
+      fs.rmSync(TEST_ROOT, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    });
+  }
+  return root;
 }
 
 // Scripted response: either { kind:'tool', name, args, text? } or { kind:'text', text }.

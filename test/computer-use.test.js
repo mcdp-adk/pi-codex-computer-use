@@ -1,14 +1,14 @@
 // Acceptance tests for running a cell in the Codex REPL from pi.
 // Seam: real pi SDK session with a faux provider scripting tool calls; the
 // Codex REPL and everything behind the tools is the real runtime.
-import { describe, it, before, after } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { readCodexConfig } from '../src/config.mjs';
-import { makeTempRoot, removeTempRoot, createScriptedSession, toolResults, toolContentTexts, toolContentImages } from './harness.js';
+import { makeTempRoot, createScriptedSession, toolResults, toolContentTexts, toolContentImages } from './harness.js';
 
 // Capture the first open window the runtime will capture: which windows exist,
 // and whether they are minimized or browser windows (refused by the helper's
@@ -64,15 +64,9 @@ async function waitUntil(pred, timeoutMs, stepMs = 200) {
 const LIST_APPS_CELL = `nodeRepl.write(JSON.stringify(await globalThis.sky.list_apps()));`;
 
 withRuntime('run a cell in the Codex REPL from pi', () => {
-  let root;
-
-  before(() => {
-    root = makeTempRoot();
-  });
-
-  after(() => {
-    removeTempRoot(root);
-  });
+  // One directory for the whole suite, removed with every other test
+  // directory when the test process exits (test/harness.js).
+  const root = makeTempRoot();
 
   it('criterion 1: scripted list-apps cell returns apps as text', async () => {
     const { session } = await createScriptedSession({

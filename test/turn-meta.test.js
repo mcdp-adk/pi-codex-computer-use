@@ -4,12 +4,12 @@
 // what the user/model observes: the cell returns the request meta it saw
 // (nodeRepl.requestMeta), turn ids change between agent runs, and pi's
 // session id is carried as session_id.
-import { describe, it, before, after } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import { readCodexConfig } from '../src/config.mjs';
-import { makeTempRoot, removeTempRoot, createScriptedSession, toolResults, toolContentTexts } from './harness.js';
+import { makeTempRoot, createScriptedSession, toolResults, toolContentTexts } from './harness.js';
 
 const hasRealRuntime = () => {
   try {
@@ -29,15 +29,9 @@ const META_PROBE_CELL =
   "nodeRepl.write(typeof nodeRepl.requestMeta === 'undefined' ? 'NO_REQUEST_META' : JSON.stringify(nodeRepl.requestMeta));";
 
 withRuntime('turn metadata on every computer-use cell (observed by the cell)', () => {
-  let root;
-
-  before(() => {
-    root = makeTempRoot('pi-cua-t5');
-  });
-
-  after(() => {
-    removeTempRoot(root);
-  });
+  // One directory for the whole suite, removed with every other test
+  // directory when the test process exits (test/harness.js).
+  const root = makeTempRoot('pi-cua-t5');
 
   it('the cell sees params._meta turn metadata as nodeRepl.requestMeta with pi session id and a per-run turn id', async () => {
     const { session } = await createScriptedSession({
