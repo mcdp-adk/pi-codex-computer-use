@@ -80,7 +80,7 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
     const home = codexHome('entry', {
       env: `NODE_REPL_TRUSTED_SERVICES = '${JSON.stringify({ sky: '@oai/sky/service' }).replace(/'/g, "\\'")}'`,
     });
-    const restore = setCodeHome(home);
+    const restore = setCodexHome(home);
     try {
       const { session } = await createScriptedSession({
         cwd: root,
@@ -111,7 +111,7 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
     // file is sent through pi's ui surface, the same path pi's CLI shows
     // the user.
     const home = makeTempRoot('codex-home-missing-file');
-    const restore = setCodeHome(home);
+    const restore = setCodexHome(home);
     try {
       const { session } = await createScriptedSession({
         cwd: root,
@@ -136,7 +136,7 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
     // the file and why it could not be used.
     const home = makeTempRoot('codex-home-unparseable');
     fs.writeFileSync(path.join(home, 'config.toml'), 'this is not TOML ]]\\][');
-    const restore = setCodeHome(home);
+    const restore = setCodexHome(home);
     try {
       const { session } = await createScriptedSession({
         cwd: root,
@@ -165,7 +165,7 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
     const home = codexHome('escapes', {
       env: 'NODE_REPL_TRUSTED_SERVICES = "{\\"sky\\":\\"@oai/sky/service\\"}"',
     });
-    const restore = setCodeHome(home);
+    const restore = setCodexHome(home);
     try {
       const { session } = await createScriptedSession({
         cwd: root,
@@ -201,7 +201,7 @@ command = 'C:\\bogus\\other-trap.exe'
 `,
       env: `NODE_REPL_TRUSTED_SERVICES = '${JSON.stringify({ sky: '@oai/sky/service' }).replace(/'/g, "\\'")}'`,
     });
-    const restore = setCodeHome(home);
+    const restore = setCodexHome(home);
     try {
       const { session } = await createScriptedSession({
         cwd: root,
@@ -226,7 +226,9 @@ command = 'C:\\bogus\\other-trap.exe'
   });
 });
 
-function setCodeHome(home) {
+// Point CODEX_HOME at `home` until the returned function restores the
+// previous value (or unset). One save/restore per test.
+function setCodexHome(home) {
   const prev = process.env.CODEX_HOME;
   process.env.CODEX_HOME = home;
   return () => {
