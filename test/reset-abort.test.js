@@ -1,7 +1,7 @@
 // Acceptance tests for the reset, crash recovery, and abort criteria.
 // Seam: real pi SDK session with a faux provider scripting tool calls; the
 // Codex REPL and everything behind the tools is the real runtime.
-import { describe, it, before } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,7 +9,7 @@ import { spawn, execSync } from 'node:child_process';
 
 import { readCodexConfig } from '../src/config.mjs';
 import { RESET_NOTICE } from '../src/repl.mjs';
-import { makeTempRoot, createScriptedSession, toolResults, toolContentTexts } from './harness.js';
+import { makeTempRoot, removeTempRoot, createScriptedSession, toolResults, toolContentTexts } from './harness.js';
 
 const hasRealRuntime = () => {
   try {
@@ -56,6 +56,10 @@ withRuntime('reset, crash recovery, and abort', () => {
 
   before(() => {
     root = makeTempRoot('pi-cua-t6');
+  });
+
+  after(() => {
+    removeTempRoot(root);
   });
 
   function procSnapshot() {

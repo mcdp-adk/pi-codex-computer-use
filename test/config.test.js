@@ -4,20 +4,20 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { readCodexConfig } from '../src/config.mjs';
+import { makeTempRoot, removeTempRoot } from './harness.js';
 
-function codexHomeWith(toml) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-cfg-'));
+function codexHomeWith(t, toml) {
+  const home = makeTempRoot('codex-home-cfg', t);
   fs.writeFileSync(path.join(home, 'config.toml'), toml);
   return home;
 }
 
 describe('config: TOML parsing of the Codex configuration', () => {
-  it('readCodexConfig extracts the node_repl entry, ignoring other tables', () => {
-    const home = codexHomeWith(`
+  it('readCodexConfig extracts the node_repl entry, ignoring other tables', (t) => {
+    const home = codexHomeWith(t, `
 model = "gpt-6.1-sol"
 command = "top-level-trap"
 [desktop]
@@ -46,12 +46,11 @@ command = "other-trap"
       assert.equal(cfg.env.BROWSER_USE_AVAILABLE_BACKENDS, 'chrome,iab,mcpapps');
     } finally {
       if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
-      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 
-  it('readCodexConfig reports a missing config file', () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-missing-'));
+  it('readCodexConfig reports a missing config file', (t) => {
+    const home = makeTempRoot('codex-home-missing', t);
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = home;
     try {
@@ -59,12 +58,11 @@ command = "other-trap"
       assert.match(cfg.missing[0], /config/i);
     } finally {
       if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
-      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 
-  it('readCodexConfig reports an unparseable config file instead of throwing', () => {
-    const home = codexHomeWith('this is = not toml ==\n[');
+  it('readCodexConfig reports an unparseable config file instead of throwing', (t) => {
+    const home = codexHomeWith(t, 'this is = not toml ==\n[');
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = home;
     try {

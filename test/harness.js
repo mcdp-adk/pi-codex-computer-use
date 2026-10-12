@@ -13,7 +13,9 @@ import {
   DefaultResourceLoader,
   DefaultPackageManager,
   createAgentSession,
+  ModelRuntime,
 } from '@earendil-works/pi-coding-agent';
+import { AuthStorage } from '../node_modules/@earendil-works/pi-coding-agent/dist/core/auth-storage.js';
 
 export const MODEL = {
   id: 'faux-1',
@@ -40,10 +42,19 @@ const MSG_BASE = () => ({
   persist: true,
 });
 
-export function makeTempRoot(label = 'pi-cua-test') {
+// Create a temp directory under os.tmpdir(). With a node:test context,
+// registers its removal after the test — every test removes what it creates.
+export function makeTempRoot(label = 'pi-cua-test', t) {
   const root = path.join(os.tmpdir(), `${label}-${process.pid}-${Math.random().toString(36).slice(2)}`);
   fs.mkdirSync(root, { recursive: true });
+  if (t) t.after(() => removeTempRoot(root));
   return root;
+}
+
+// Remove a directory makeTempRoot created. On Windows the REPL can still hold
+// handles on it right after session_shutdown, so retry before giving up.
+export function removeTempRoot(dir) {
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
 // Scripted response: either { kind:'tool', name, args, text? } or { kind:'text', text }.
@@ -130,6 +141,10 @@ export async function createScriptedSessionFromPackage({ scripts, cwd }) {
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(cwd),
     model: MODEL,
+    // In-memory credentials + models store: the file-backed defaults lazily
+    // write auth.json / models-store.json into agentDir (= cwd), recreating
+    // the directory after its test has already removed it.
+    modelRuntime: await ModelRuntime.create({ modelsPath: null, credentials: AuthStorage.inMemory() }),
   });
   const session = result.session ?? result;
   // Headless tests observe notices through the injected ui surface, like
