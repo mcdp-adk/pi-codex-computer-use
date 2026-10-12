@@ -20,7 +20,7 @@ npm install
 pi install ./path/to/pi-codex-computer-use
 ```
 
-`pi install` adds the package to your settings; the extension registers the `computer_use` / `computer_use_reset` tools, and the `codex-computer-use` skill becomes available to the model.
+`pi install` adds the package to your settings and records the path of the clone, so the clone must stay where it is — moving or deleting it breaks the package. The extension registers the `computer_use` / `computer_use_reset` tools, and the `codex-computer-use` skill becomes available to the model.
 
 ## Use
 
