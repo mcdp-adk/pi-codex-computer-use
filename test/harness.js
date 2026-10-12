@@ -2,9 +2,17 @@
 // scripts tool calls against the real Codex runtime on this machine.
 // The only fake here is the model boundary (faux provider with scripted
 // streamSimple); the REPL, tools, and runtime are real.
+// The harness also owns what the suites share: the ONE check that the real
+// Codex runtime is available (its own reading of the real Codex installation,
+// written without the package's code so a broken package fails tests instead
+// of skipping them), and the process-tree helpers the suites watch
+// processes with.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn, execSync } from 'node:child_process';
+import { describe } from 'node:test';
+import { parse as parseToml } from 'smol-toml';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import {
   SessionManager,
@@ -180,4 +188,82 @@ export function toolContentTexts(result) {
 
 export function toolContentImages(result) {
   return (result?.content ?? []).filter((c) => c.type === 'image');
+}
+
+// ---- The real Codex installation ----
+
+// The harness's own reading of the real Codex installation — deliberately not
+// the package's code: a broken package must fail these tests, not skip them.
+// Parses Codex's own configuration (CODEX_HOME or ~/.codex/config.toml) and
+// answers with the node_repl server entry, or with the reason the runtime is
+// unusable.
+export function realCodexInstallation() {
+  const file = path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'config.toml');
+  if (!fs.existsSync(file)) return { missing: `no Codex config file at ${file}` };
+  let doc;
+  try {
+    doc = parseToml(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    return { missing: `Codex config file ${file} does not parse (${err.message})` };
+  }
+  const entry = doc.mcp_servers?.node_repl;
+  if (!entry || typeof entry !== 'object' || !entry.command) {
+    return { missing: `no [mcp_servers.node_repl] command in ${file}` };
+  }
+  if (!fs.existsSync(entry.command)) {
+    return { missing: `node_repl command ${entry.command} does not exist` };
+  }
+  return {
+    file,
+    command: String(entry.command),
+    args: Array.isArray(entry.args) ? entry.args.map(String) : [],
+    env: entry.env && typeof entry.env === 'object'
+      ? Object.fromEntries(Object.entries(entry.env).map(([k, v]) => [k, String(v)]))
+      : {},
+  };
+}
+
+// Gates a suite on a real Codex runtime: with one, the suite runs; without,
+// it skips visibly with the reason. The one availability check every suite
+// goes through.
+export function withRealRuntime(name, fn) {
+  const install = realCodexInstallation();
+  return install.missing
+    ? describe(name, { skip: `needs a real Codex runtime: ${install.missing}` }, fn)
+    : describe(name, fn);
+}
+
+// ---- Process-tree helpers (shared by the suites that watch processes) ----
+
+export function procSnapshot() {
+  const out = execSync(
+    'powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress"',
+    { encoding: 'utf8' },
+  );
+  const arr = JSON.parse(out);
+  return Array.isArray(arr) ? arr : [arr];
+}
+
+export function replProcPids() {
+  return procSnapshot().filter((p) => /node_repl/i.test(p.Name ?? '')).map((p) => p.ProcessId);
+}
+
+// Kill a process and its whole tree: the snapshot cannot tell the REPL top
+// process from its own helper child, and killing only the child leaves
+// the top process alive — the host sees no exit, no relaunch, no notice.
+export function killTree(pid) {
+  return new Promise((resolve) => {
+    const t = spawn('taskkill', ['/pid', String(pid), '/T', '/F']);
+    t.on('exit', resolve);
+    t.on('error', resolve);
+  });
+}
+
+export async function waitUntil(pred, timeoutMs, stepMs = 100) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (pred()) return true;
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+  return pred();
 }
