@@ -30,5 +30,5 @@ A test exists to buy confidence that the package works when the user really uses
 
 ## Commits
 
-- **Conventional Commits without a scope.** *checked: commitlint*
-- **One intention per commit.** The title describes the whole change; a body only explains a reason the title cannot carry.
+- **Conventional Commits, title only.** No scope and no body. *checked: commitlint*
+- **One intention per commit.** The title describes the whole change.
