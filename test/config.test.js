@@ -155,6 +155,40 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
     }
   });
 
+  it('escapes in TOML double-quoted strings are processed per TOML, not passed through literally', async () => {
+    // The services JSON rides in a double-quoted TOML string, so every quote
+    // it needs is an escaped \" — the original config case (spec story 23):
+    // readCodexConfig had to turn "{\"sky\":\"@oai/sky/service\"}" into the
+    // JSON the runtime reads. Escapes not processed would leave a value that
+    // is not that JSON, and sky would not be configured from it.
+    const home = codexHome('escapes', {
+      env: 'NODE_REPL_TRUSTED_SERVICES = "{\\"sky\\":\\"@oai/sky/service\\"}"',
+    });
+    const restore = setCodeHome(home);
+    try {
+      const { session } = await createScriptedSession({
+        cwd: root,
+        scripts: [
+          { kind: 'tool', name: 'computer_use', args: { code: CONFIG_PROBE_CELL } },
+          { kind: 'text', text: 'done' },
+        ],
+      });
+      try {
+        await session.prompt('run a cell');
+        const [result] = toolResults(session);
+        assert.ok(!result?.isError, `cell failed: ${toolContentTexts(result)}`);
+        const observed = lastJsonObject(toolContentTexts(result));
+        assert.equal(observed.trusted, 'object', 'sky was not configured from the escaped double-quoted value');
+        assert.match(toolContentTexts(result), /probe-ran/, 'the config-probe cell did not run');
+      } finally {
+        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+        session.dispose();
+      }
+    } finally {
+      restore();
+    }
+  });
+
   it('tables other than [mcp_servers.node_repl] are ignored by the launch', async () => {
     const home = codexHome('other-tables', {
       topTables: `[desktop]
