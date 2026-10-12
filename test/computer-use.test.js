@@ -17,6 +17,7 @@ import {
   toolResults,
   toolContentTexts,
   toolContentImages,
+  lastJsonObject,
 } from './harness.js';
 
 // Capture the first open window the runtime will capture: which windows exist,
@@ -251,13 +252,3 @@ withRealRuntime('run a cell in the Codex REPL from pi', () => {
     assert.deepEqual(offenders, [], `host files referencing pi: ${offenders.join(', ')}`);
   });
 });
-
-function lastJsonObject(text) {
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    if (lines[i].startsWith('{')) {
-      try { return JSON.parse(lines[i]); } catch { /* keep looking */ }
-    }
-  }
-  return {};
-}

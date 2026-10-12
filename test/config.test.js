@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
-import { realCodexInstallation, withRealRuntime, makeTempRoot, createScriptedSession, toolResults, toolContentTexts } from './harness.js';
+import { realCodexInstallation, withRealRuntime, makeTempRoot, createScriptedSession, toolResults, toolContentTexts, lastJsonObject } from './harness.js';
 
 // A fake Codex home whose config.toml the test spells out itself. The
 // [mcp_servers.node_repl] table names the real runtime's `command` so the
@@ -234,16 +234,4 @@ function setCodexHome(home) {
   return () => {
     if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
   };
-}
-
-// The last line of cell output that parses as a JSON object — the cell's own
-// write, after any runtime echo lines.
-function lastJsonObject(text) {
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    if (lines[i].startsWith('{')) {
-      try { return JSON.parse(lines[i]); } catch { /* keep looking */ }
-    }
-  }
-  return {};
 }
