@@ -20,6 +20,7 @@ A test exists to buy confidence that the package works when the user really uses
 - **One seam.** A test drives a pi SDK session that loads the package as pi does, with pi's faux provider scripting the model, against the real Codex runtime. Only the model is replaced; the REPL is never faked, because the risk lives in the real runtime.
 - **Observable results.** Assert what the user or the model sees: tool results, tool descriptions, which tools exist, notices, leftover processes.
 - **A test proves its claim.** It fails when the behavior it names is removed. It waits on the observable event its claim depends on, such as a marker the cell writes once it runs, rather than on a fixed delay or an earlier event.
+- **Own windows.** A test captures or sends input only to windows it opens itself, and closes them in teardown, also when it fails.
 - **Visible skips.** When the machine cannot run a test, the test skips with a reason (`t.skip`, `describe.skip`).
 - **Clean teardown.** Every session ends with `session_shutdown`, so no REPL process outlives its test; temporary files go through the harness.
 
