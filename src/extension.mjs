@@ -33,8 +33,10 @@ export default function (pi) {
     computerUse.beginRun();
   });
 
-  // Run over — settled normally or aborted (physical Escape aborts the run):
-  // signal turn_ended to the runtime, as Codex's own hooks do on Stop/Interrupt.
+  // Run over — settled normally or aborted (GLOSSARY.md separates an Escape
+  // stop — the runtime's Escape-key marker — from pi's abort). Signal
+  // turn_ended to the runtime, as Codex's own hooks do on Stop/Interrupt;
+  // the signal has no effect for computer use today (docs/runtime-behavior.md).
   // Fire-and-forget: pi awaits agent_settled listeners, so an awaited goodbye
   // (the REPL can be busy with the just-aborted cell for up to 5s) would stall
   // the run's settle; the host itself swallows its transport errors.

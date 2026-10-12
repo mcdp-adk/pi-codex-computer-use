@@ -73,10 +73,12 @@ export class ComputerUse {
     this.#turnId = `${this.#sessionId}-turn-${this.#turnSeq}-${randomBytes(3).toString('hex')}`;
   }
 
-  // The agent run has ended (settled normally or aborted — physical Escape
-  // aborts the run): the runtime is signalled the way Codex's own hooks do
-  // on Stop/Interrupt, and the runtime uses it so a physical Escape stops
-  // computer use for the rest of the agent run. Best-effort: the goodbye
+  // The agent run has ended — settled normally, or aborted: pi's abort
+  // cancels a tool call or streaming request (GLOSSARY.md), it is not the
+  // runtime's Escape stop. The
+  // runtime is signalled the way Codex's own hooks do on Stop/Interrupt;
+  // the signal is a courtesy, and for computer use it has no effect today
+  // (docs/runtime-behavior.md). Best-effort: the goodbye
   // must never stall the run's settle path (pi awaits agent_settled
   // listeners), so it uses a short timeout and swallows errors — the
   // runtime's own timeout covers the rest. The run id is dropped first, so
