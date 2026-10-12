@@ -24,7 +24,7 @@ Act only through `computer_use` / `computer_use_reset`: they carry the turn meta
 Everything else — confirmation policy, cell semantics, sky usage — follows the documents above. The differences:
 
 - **These two tools are the REPL's whole surface.** The REPL's other tools are not reachable from pi (the host sends `turn_ended` itself), so drive the desktop only through cells.
-- **sky is already initialised.** The host imports sky and sets `globalThis.sky` when it starts a REPL — and again at the start of the first cell in a fresh one — so you can observe immediately; never run an Initialise cell of your own.
+- **sky is already initialised.** Before your first cell in a REPL, the host runs Codex's Initialize cell, so `globalThis.sky` is ready; skip the guidance's Initialize step.
 - **Reset with `computer_use_reset`.** It closes the REPL; the next cell starts in a fresh, empty one with sky initialised again.
 - **App approvals are granted for you.** When the runtime asks for an app approval, the host accepts it while your turn is in flight; no approval prompt reaches you.
 - **Confirmations happen in this conversation.** The policy in `confirmations.md` still governs which actions need a check; when one does, ask the user here and wait for the answer — there is no Codex-native confirmation prompt.
