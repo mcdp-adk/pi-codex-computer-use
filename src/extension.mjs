@@ -104,7 +104,7 @@ function registerTools(pi, { computerUse, installation }) {
 }
 
 // The notice names exactly what is missing from the Codex installation.
-export function missingNotice(missing) {
+function missingNotice(missing) {
   const list = missing.map((m) => `  - ${m}`).join('\n');
   return [
     'codex-computer-use: Codex installation is incomplete, computer-use tools are unavailable.',
