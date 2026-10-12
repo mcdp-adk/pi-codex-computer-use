@@ -21,7 +21,7 @@
   },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || exit 0",
-    "test": "node --test --test-concurrency=1 --test-force-exit --test-reporter=spec \"test/*.test.js\""
+    "test": "node test/run.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.8.1",
