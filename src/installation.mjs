@@ -106,7 +106,7 @@ function checkSkyModule(env) {
     if (!fs.existsSync(path.join(dir, entryFile))) {
       throw new Error(`Cannot resolve ${SKY_SERVICE}: ${packageName}'s entry file ${entryFile} is missing`);
     }
-    return dir;
+    return;
   }
   throw new Error(`Cannot resolve ${SKY_SERVICE}: package ${packageName} not found under NODE_REPL_NODE_MODULE_DIRS`);
 }
