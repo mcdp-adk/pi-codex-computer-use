@@ -54,13 +54,13 @@ export default function (pi) {
 // installation. The computer_use description names the located guidance
 // files, so the model reads the real Codex documents.
 function registerTools(pi, { computerUse, turnMeta, docs }) {
-  const guidanceBlurb = ` Codex documents: guidance \`${docs.guidance}\` (computer_use_guidance_path), confirmation policy \`${docs.confirmationPolicy}\` (computer_use_confirmations_path), sky API reference \`${docs.skyReference}\` (computer_use_sky_api_path).`;
+  const guidanceBlurb = ` Codex guidance: operating rules \`${docs.guidance}\` (computer_use_guidance_path), confirmation policy \`${docs.confirmationPolicy}\` (computer_use_confirmations_path), sky API reference \`${docs.skyReference}\` (computer_use_sky_api_path).`;
 
   pi.registerTool({
     name: 'computer_use',
     label: 'Computer use',
     description:
-      'Run a JavaScript cell in the Codex computer-use REPL, whose sky API observes and operates Windows desktop apps. Returns what the cell produces: text passed to nodeRepl.write as text, and images passed to nodeRepl.emitImage as images. Cell semantics: top-level await works, bindings and values on globalThis persist across cells, only dynamic imports are available, and there is no `process`. The runtime applies its own default timeout; pass timeout_ms to override it for a slow cell. sky is already initialised. Before the first cell, load the codex-computer-use skill and read the Codex documents below.' + guidanceBlurb,
+      'Run a JavaScript cell in the Codex computer-use REPL, whose sky API observes and operates Windows desktop apps. Returns what the cell produces: text passed to nodeRepl.write as text, and images passed to nodeRepl.emitImage as images. Cell semantics: top-level await works, bindings and values on globalThis persist across cells, only dynamic imports are available, and there is no `process`. The runtime applies its own default timeout; pass timeout_ms to override it for a slow cell. sky is already initialised. Before the first cell, load the codex-computer-use skill and read the Codex guidance below.' + guidanceBlurb,
     parameters: {
       type: 'object',
       properties: {
