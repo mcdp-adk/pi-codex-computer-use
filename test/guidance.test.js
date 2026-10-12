@@ -4,7 +4,7 @@
 // package the way pi does — no direct extension invocation, no discovery
 // call. Needs a real Codex installation to discover and skips visibly
 // without one, like every runtime-gated suite.
-import { describe, it, before, after } from 'node:test';
+import { it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';

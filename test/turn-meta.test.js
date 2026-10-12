@@ -4,7 +4,7 @@
 // what the user/model observes: the cell returns the request meta it saw
 // (nodeRepl.requestMeta), turn ids change between agent runs, and pi's
 // session id is carried as session_id.
-import { describe, it } from 'node:test';
+import { it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { makeTempRoot, withRealRuntime, createScriptedSession, toolResults, toolContentTexts } from './harness.js';

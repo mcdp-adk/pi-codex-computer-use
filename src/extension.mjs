@@ -5,6 +5,7 @@
 import { ComputerUse } from './computer-use.mjs';
 import { locateInstallation } from './installation.mjs';
 
+/** @public pi calls this factory, named in package.json "pi.extensions". */
 export default function (pi) {
   const computerUse = new ComputerUse();
 

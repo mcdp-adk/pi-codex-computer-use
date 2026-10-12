@@ -6,7 +6,7 @@ How code in this repo is written, for whoever writes or reviews it. A rule marke
 
 - **Decisions and terms.** Code follows the decisions in `docs/adr/` and the terms in `GLOSSARY.md`. A change that departs from one updates it in the same PR.
 - **Host logic stays pi-agnostic.** Only `src/extension.mjs` imports the pi agent; the rest of `src/` could serve a different host. *checked: `npm test`*
-- **Every part has a production caller.** Parameters, options, exports, globals, and return values exist because production uses them; nothing is added only so a test can reach inside.
+- **Every part has a production caller.** Parameters, options, exports, globals, and return values exist because production uses them; nothing is added only so a test can reach inside. *checked for exports and files: `npm run lint`*
 - **Fail fast with the real cause.** A runtime error reaches the model as a tool error carrying the runtime's own message; the host adds context, never a paraphrase.
 
 ## Comments

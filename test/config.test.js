@@ -6,7 +6,7 @@
 // function, is the independent statement of Codex's file
 // layout. Needs the real runtime on this machine and skips visibly
 // without it, like every runtime-gated suite.
-import { describe, it } from 'node:test';
+import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
