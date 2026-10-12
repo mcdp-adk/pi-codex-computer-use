@@ -12,21 +12,3 @@ if (!globalThis.sky) {
   globalThis.sky = sky;
 }
 `;
-
-export const SCREENSHOT_CELL_TPL = `
-const __all = await globalThis.sky.list_windows();
-const __win = __all.find((w) => w.id === __WINDOW_ID__)
-  ?? __all[0];
-if (!__win) throw new Error('no window available for screenshot');
-const __state = await globalThis.sky.get_window_state({
-  window: __win,
-  include_screenshot: true,
-  include_text: false,
-});
-const __shots = __state.screenshots ?? [];
-nodeRepl.write(JSON.stringify({ window: { id: __win.id, title: __win.title }, screenshots: __shots.length }));
-`;
-
-export function newScreenshotCell(windowId) {
-  return SCREENSHOT_CELL_TPL.replace('__WINDOW_ID__', JSON.stringify(windowId));
-}

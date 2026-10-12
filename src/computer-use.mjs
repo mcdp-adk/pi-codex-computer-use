@@ -4,7 +4,7 @@
 import { ReplHost, RESET_NOTICE } from './repl.mjs';
 import { readCodexConfig } from './config.mjs';
 import { checkSkyModule } from './sky-path.mjs';
-import { SKY_INIT_CELL, newScreenshotCell } from './cells.mjs';
+import { SKY_INIT_CELL } from './cells.mjs';
 
 export class ComputerUse {
   constructor(opts) {

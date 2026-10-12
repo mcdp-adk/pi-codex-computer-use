@@ -10,7 +10,26 @@ import { execSync } from 'node:child_process';
 
 import { readCodexConfig } from '../src/config.mjs';
 import { makeTempRoot, createScriptedSession, toolResults, toolContentTexts, toolContentImages } from './harness.js';
-import { newScreenshotCell } from '../src/cells.mjs';
+
+// Capture the first open window the runtime will capture: which windows exist,
+// and whether they are minimized or browser windows (refused by the helper's
+// URL policy), depends on the developer's desktop.
+const SCREENSHOT_CELL = `
+const errors = [];
+for (const window of await sky.list_windows()) {
+  try {
+    const state = await sky.get_window_state({ window, include_screenshot: true, include_text: false });
+    if (state.screenshots?.length) {
+      nodeRepl.write(JSON.stringify({ window: window.title, screenshots: state.screenshots.length }));
+      errors.length = 0;
+      break;
+    }
+  } catch (error) {
+    errors.push(window.title + ': ' + error.message);
+  }
+}
+if (errors.length) throw new Error('no window could be captured: ' + errors.join('; '));
+`;
 
 const hasRealRuntime = () => {
   try {
@@ -80,7 +99,7 @@ withRuntime('run a cell in the Codex REPL from pi', () => {
     const { session } = await createScriptedSession({
       cwd: root,
       scripts: [
-        { kind: 'tool', name: 'computer_use', args: { code: newScreenshotCell(null) } },
+        { kind: 'tool', name: 'computer_use', args: { code: SCREENSHOT_CELL } },
         { kind: 'text', text: 'took screenshot' },
       ],
     });
