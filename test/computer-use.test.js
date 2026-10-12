@@ -44,7 +44,6 @@ withRealRuntime('run a cell in the Codex REPL from pi', () => {
   // One directory for the whole suite, removed with every other test
   // directory when the test process exits (test/harness.js).
   const root = makeTempRoot();
-  fs.mkdirSync(root, { recursive: true });
 
   it('criterion 1: scripted list-apps cell returns apps as text', async () => {
     const { session } = await createScriptedSession({

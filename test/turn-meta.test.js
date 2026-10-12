@@ -6,7 +6,6 @@
 // session id is carried as session_id.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 
 import { makeTempRoot, withRealRuntime, createScriptedSession, toolResults, toolContentTexts } from './harness.js';
 
@@ -14,7 +13,6 @@ withRealRuntime('turn metadata on every computer-use cell (observed by the cell)
   // One directory for the whole suite, removed with every other test
   // directory when the test process exits (test/harness.js).
   const root = makeTempRoot('pi-cua-t5');
-  fs.mkdirSync(root, { recursive: true });
 
   // The cell writes what the runtime handed it as request meta. If no meta
   // arrived, write a marker so the assertion fails loudly rather than on
