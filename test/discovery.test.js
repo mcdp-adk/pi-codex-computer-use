@@ -24,7 +24,10 @@ import { SettingsManager, DefaultPackageManager, DefaultResourceLoader } from '@
 // config, replEntry (exe + config entry + sky package + sky API ref doc),
 // marketplace (guidance/confirmations), skyPkg (the @oai/sky package under
 // the node_modules the REPL env names), skyEntry (the package's export
-// entry file; off leaves a bare manifest, like a half-copied install).
+// entry file; off leaves a bare manifest, like a half-copied install),
+// mainOnlyEntry (the manifest names its entry through both main and a
+// bare-string exports pointing at different files, and only the file main
+// names is on disk).
 // The process-exit hook in test/harness.js removes the directory; every test
 // creates its directories only through makeTempRoot.
 function fakeCodexHome(label, parts = {}) {
@@ -42,12 +45,23 @@ function fakeCodexHome(label, parts = {}) {
       config += `NODE_REPL_NODE_MODULE_DIRS = '${nm}'\n`;
       if (parts.skyPkg !== false) {
         fs.mkdirSync(path.join(nm, '@oai', 'sky', 'docs'), { recursive: true });
-        fs.writeFileSync(path.join(nm, '@oai', 'sky', 'package.json'), JSON.stringify({
-          exports: { '.': './dist/index.js' },
-        }));
-        if (parts.skyEntry !== false) {
-          fs.mkdirSync(path.join(nm, '@oai', 'sky', 'dist'), { recursive: true });
-          fs.writeFileSync(path.join(nm, '@oai', 'sky', 'dist', 'index.js'), 'export {}');
+        fs.mkdirSync(path.join(nm, '@oai', 'sky', 'dist'), { recursive: true });
+        if (parts.mainOnlyEntry) {
+          // The manifest itself names the entry twice, through main and through
+          // a bare-string exports, pointing at different files — only the file
+          // main names is on disk.
+          fs.writeFileSync(path.join(nm, '@oai', 'sky', 'package.json'), JSON.stringify({
+            main: './dist/main.js',
+            exports: './dist/exports.js',
+          }));
+          fs.writeFileSync(path.join(nm, '@oai', 'sky', 'dist', 'main.js'), 'export {}');
+        } else {
+          fs.writeFileSync(path.join(nm, '@oai', 'sky', 'package.json'), JSON.stringify({
+            exports: { '.': './dist/index.js' },
+          }));
+          if (parts.skyEntry !== false) {
+            fs.writeFileSync(path.join(nm, '@oai', 'sky', 'dist', 'index.js'), 'export {}');
+          }
         }
         // Also create the sky API reference doc that discovery looks for.
         fs.writeFileSync(path.join(nm, '@oai', 'sky', 'docs', 'sky-window2-api.md'), 'api');
@@ -149,6 +163,37 @@ describe('completeness discovery: tools only exist when the Codex installation i
           /sky module|@oai\/sky/i,
           `notice should name the sky package, got: ${notices[0]}`,
         );
+      } finally {
+        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+        session.dispose();
+      }
+    } finally {
+      if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
+    }
+  });
+
+  it('a manifest whose main and bare exports name different files resolves the entry through main', async () => {
+    const home = fakeCodexHome('main-entry', { replEntry: true, marketplace: true, mainOnlyEntry: true });
+    const prev = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = home;
+    try {
+      const { session } = await createScriptedSessionFromPackage({
+        cwd: makeTempRoot('pi-cua-main-entry'),
+        scripts: [{ kind: 'text', text: 'done' }],
+      });
+      try {
+        await session.prompt('try computer use');
+        // The manifest names its entry through both main (dist/main.js, on
+        // disk) and a bare-string exports (dist/exports.js, absent): the
+        // entry is main's file, discovery is complete, the tools register.
+        const allNames = session.getAllTools().map((t) => t.name);
+        assert.deepEqual(
+          allNames.filter((n) => n.startsWith('computer_use')),
+          ['computer_use', 'computer_use_reset'],
+          'the manifest resolved its entry through main, so discovery must be complete',
+        );
+        const notices = session.notifications.map((n) => n.message);
+        assert.equal(notices.length, 0, `no notice for a complete install, got: ${JSON.stringify(notices)}`);
       } finally {
         await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
         session.dispose();
