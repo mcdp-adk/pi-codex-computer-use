@@ -14,7 +14,12 @@ Verified against the Codex runtime `cua_node/cfb32733c877621e` and the bundled `
 - The REPL serves `js` (`code`, `title`, `timeout_ms`), `js_reset`, `js_add_node_module_dir`, and `turn_ended` (`hook_event_name`, `session_id`, `turn_id`). *source*
 - `js` runs a cell for 30000 ms when `timeout_ms` is omitted. *source*
 - A failed cell returns `isError` with the error's `message` only; its `cause` is dropped. *probe*
-- App approvals arrive as form elicitations; accepting with empty content grants them. *test: computer-use, criterion 2*
+- App approvals arrive as form elicitations; accepting with empty content grants them. The helper remembers an accepted grant: captures of further windows of the same app succeed with no new elicitation, also after the REPL is reset and in a fresh pi session. *test: computer-use, criterion 2 (no prompt on a scripted capture); probe, [#16](https://github.com/mcdp-adk/pi-codex-computer-use/issues/16) (0 `elicitation/create` requests across a reset REPL and a second session, all captures succeeding)*
+
+## Windows
+
+- `sky.list_windows()` does not list a WinForms form shown by a powershell process, or a console window, while it is visible on screen. *probe, [#16](https://github.com/mcdp-adk/pi-codex-computer-use/issues/16)*
+- An HTA the test process opens in its own `mshta.exe` process is listed by `sky.list_windows()` under its `<title>`, and `get_window_state` returns a screenshot of it. *test: computer-use, criterion 2*
 
 ## Turn metadata and turn end
 
