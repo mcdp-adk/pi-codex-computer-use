@@ -26,6 +26,7 @@ Verified against the Codex runtime `cua_node/cfb32733c877621e` and the bundled `
 - `await import("@oai/sky")` resolves; a top-level static import is rejected with a message naming the dynamic form. *test: every runtime test (sky init)*
 - `process` is unavailable; `await import("node:fs")` works. *probe*
 - Top-level `const`/`let` persist across cells and can be redeclared (a redeclared `const` prints a warning). Codex's guidance says otherwise. *probe*
+- An uncaught error in a cell does not end the session: later cells keep running against the same REPL, with sky still initialised. *test: reset-notice*
 - `nodeRepl.env` shows only the variables in `NODE_REPL_UNTRUSTED_ENV_ALLOWLIST`, so a cell cannot read its launch environment. `nodeRepl.tmpDir` follows `TMP`/`TEMP`. *test: computer-use, criterion 6*
 
 ## Launch environment
