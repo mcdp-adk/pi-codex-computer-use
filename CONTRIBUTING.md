@@ -18,16 +18,17 @@ Conventional Commits:
 ## Pull requests
 
 - Changes reach `main` through a PR unless the owner asks for a direct commit.
-- The template at `.github/pull_request_template.md` gives the body its shape: the closing line — `Closes #N` when the PR finishes the issue, `Refs #N` when it does not — then `Summary`, `Evidence`, and `Merge Danger`. How to write each section is the `pr` skill's to teach.
-- The `conventions` workflow checks the PR: the title passes commitlint (a squash merge can land it on `main` as a commit message), the body carries every template heading, and — once the PR is ready — every issue it closes has all of its acceptance criteria ticked. Failures name what to fix.
+- **Title.** A PR title follows the commit rules, since a squash merge makes it a commit on `main`. *checked: conventions*
+- **Body.** The template at `.github/pull_request_template.md` gives the body its shape: the closing line — `Closes #N` when the PR finishes the issue, `Refs #N` when it does not — then `Summary`, `Evidence`, and `Merge Danger`. How to write each section is the `pr` skill's to teach. *checked: conventions*
+- **Checks.** The `conventions` workflow checks every rule marked *checked: conventions*. A rule about an issue is checked for each issue a PR closes, once the PR is ready, and a failure names what to fix.
 
 ## Acceptance criteria
 
 - Only the owner rewords an acceptance criterion; an agent proposes the new wording in conversation.
 - Every ticked acceptance criterion has evidence.
-- An issue closes only with every criterion ticked.
+- An issue closes only with every criterion ticked. *checked: conventions*
 
 ## Evidence
 
 - Evidence separates what was observed from its suspected cause, and marks a cause not reproduced as a hypothesis.
-- Evidence cites commits reachable from the PR or `main`, and states its results on GitHub.
+- Evidence cites commits reachable from the PR or `main`, and states its results on GitHub. A history rewrite drops commits from both, so evidence citing them is updated. *checked: conventions*

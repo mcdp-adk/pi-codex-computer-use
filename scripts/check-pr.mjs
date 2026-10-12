@@ -2,7 +2,8 @@
 // Checks a pull request against the repo's collaboration conventions
 // (CONTRIBUTING.md): the title passes commitlint, the body carries every
 // heading of the PR template, and, unless the pull request is a draft, every
-// issue it closes has all of its acceptance criteria ticked. Runs in the
+// issue it closes has all of its acceptance criteria ticked and cites in its
+// comments only commits reachable from the PR or `main`. Runs in the
 // conventions workflow and locally: `node scripts/check-pr.mjs <payload.json>`
 // with a hand-written `pull_request` event payload.
 import { readFile } from 'node:fs/promises';
@@ -55,7 +56,7 @@ if (closes.length && pr.draft !== true) {
     let issue;
     try {
       issue = JSON.parse(
-        execFileSync('gh', ['issue', 'view', number, '--repo', payload.repository.full_name, '--json', 'state,body'], {
+        execFileSync('gh', ['issue', 'view', number, '--repo', payload.repository.full_name, '--json', 'state,body,comments'], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
         }),
@@ -67,7 +68,34 @@ if (closes.length && pr.draft !== true) {
     if (issue.state !== 'OPEN') continue;
     const unticked = issue.body.split(/\r?\n/).filter((line) => /^\s*[-*] \[ \]/.test(line)).length;
     if (unticked) fail(`closes #${number}, which has ${unticked} unticked acceptance ${unticked === 1 ? 'criterion' : 'criteria'}`);
+    for (const sha of citedCommits(issue.comments.map((comment) => comment.body).join('\n'))) {
+      if (!isAncestorOfHead(sha)) fail(`closes #${number}, whose comments cite ${sha}, a commit that is on neither this PR nor main`);
+    }
   }
+}
+
+// The commits a text cites: the hex strings GitHub knows as commits of this
+// repo. A rewritten commit is still known to GitHub, while a hex string that
+// is not a commit, such as a runtime version, is no citation.
+function citedCommits(text) {
+  const commits = new Set();
+  for (const hex of new Set(text.match(/\b[0-9a-f]{7,40}\b/g) ?? [])) {
+    try {
+      commits.add(execFileSync('gh', ['api', `repos/${payload.repository.full_name}/commits/${hex}`, '--jq', '.sha'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim());
+    } catch (error) {
+      if (!/HTTP (404|422)/.test(error.stderr)) fail(`could not look up ${hex} on GitHub: ${error.stderr.trim() || error.message}`);
+    }
+  }
+  return commits;
+}
+
+// In the workflow HEAD is the PR merged into main, so it reaches both. A
+// commit the checkout lacks is reachable from neither.
+function isAncestorOfHead(sha) {
+  return spawnSync('git', ['merge-base', '--is-ancestor', sha, 'HEAD'], { stdio: 'ignore' }).status === 0;
 }
 
 if (problems.length) {
