@@ -5,22 +5,21 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, execSync } from 'node:child_process';
 
-import { readCodexConfig } from '../src/config.mjs';
-import { RESET_NOTICE } from '../src/repl.mjs';
-import { makeTempRoot, createScriptedSession, toolResults, toolContentTexts } from './harness.js';
+import {
+  makeTempRoot,
+  withRealRuntime,
+  createScriptedSession,
+  killTree,
+  replProcPids,
+  waitUntil,
+  toolResults,
+  toolContentTexts,
+} from './harness.js';
 
-const hasRealRuntime = () => {
-  try {
-    const cfg = readCodexConfig();
-    return !cfg.missing?.length && fs.existsSync(cfg.command);
-  } catch {
-    return false;
-  }
-};
-
-const withRuntime = hasRealRuntime() ? describe : describe.skip;
+// The reset notice as the text the model sees, asserted literally, not via
+// the package's constant (docs/runtime-behavior.md, "Cells").
+const RESET_NOTICE_TEXT = 'Codex REPL state was reset: a new REPL was started.';
 
 // The long cell writes a marker file (the externally observable start
 // signal the abort test waits for), then sleeps. __cellRoot__ is substituted
@@ -34,40 +33,11 @@ await new Promise((r) => setTimeout(r, 60000));
 nodeRepl.write('long cell finished');
 `;
 
-function killTree(pid) {
-  return new Promise((resolve) => {
-    const t = spawn('taskkill', ['/pid', String(pid), '/T', '/F']);
-    t.on('exit', resolve);
-    t.on('error', resolve);
-  });
-}
-
-async function waitUntil(pred, timeoutMs, stepMs = 100) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (pred()) return true;
-    await new Promise((r) => setTimeout(r, stepMs));
-  }
-  return pred();
-}
-
-withRuntime('reset, crash recovery, and abort', () => {
+withRealRuntime('reset, crash recovery, and abort', () => {
   // One directory for the whole suite, removed with every other test
   // directory when the test process exits (test/harness.js).
   const root = makeTempRoot('pi-cua-t6');
-
-  function procSnapshot() {
-    const out = execSync(
-      'powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress"',
-      { encoding: 'utf8' },
-    );
-    const arr = JSON.parse(out);
-    return Array.isArray(arr) ? arr : [arr];
-  }
-
-  function replProcPids() {
-    return procSnapshot().filter((p) => /node_repl/i.test(p.Name ?? '')).map((p) => p.ProcessId);
-  }
+  fs.mkdirSync(root, { recursive: true });
 
   it('criterion 1: after computer_use_reset earlier globalThis values are gone and the next call can use sky', async () => {
     const { session } = await createScriptedSession({
@@ -118,9 +88,6 @@ withRuntime('reset, crash recovery, and abort', () => {
       await session.prompt('start the repl');
       const spawned = replProcPids().filter((pid) => !baseline.includes(pid));
       assert.ok(spawned.length >= 1, 'no node_repl process appeared after the first cell');
-      // Kill the whole spawned set: the snapshot cannot tell the REPL top
-      // process from its own helper child, and killing only the child leaves
-      // the top process alive — the host sees no exit, no relaunch, no notice.
       for (const pid of spawned) await killTree(pid);
       await waitUntil(() => spawned.every((pid) => !replProcPids().includes(pid)), 5000);
       // Session is kept; the next scripted call must auto-restart the REPL
@@ -131,7 +98,7 @@ withRuntime('reset, crash recovery, and abort', () => {
         ?? results[results.length - 1];
       assert.ok(!second.isError, `second cell failed: ${toolContentTexts(second)}`);
       const text = toolContentTexts(second);
-      assert.ok(text.startsWith(RESET_NOTICE), `result did not start with reset notice: ${text.slice(0, 120)}`);
+      assert.ok(text.startsWith(RESET_NOTICE_TEXT), `result did not start with reset notice: ${text.slice(0, 120)}`);
       assert.ok(text.includes('second'), `cell output missing after notice: ${text.slice(0, 200)}`);
     } finally {
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
@@ -160,7 +127,6 @@ withRuntime('reset, crash recovery, and abort', () => {
       await session.prompt('warm the repl');
       const warmResults = toolResults(session);
       assert.ok(!warmResults[0]?.isError, `warmup cell failed: ${toolContentTexts(warmResults[0])}`);
-      const baselineAfterWarmup = baseline;
       replProc = (await waitUntil(
         () => replProcPids().find((p) => !baseline.includes(p)) ?? null,
         30000,

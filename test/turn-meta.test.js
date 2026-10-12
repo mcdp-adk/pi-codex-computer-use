@@ -8,30 +8,19 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { readCodexConfig } from '../src/config.mjs';
-import { makeTempRoot, createScriptedSession, toolResults, toolContentTexts } from './harness.js';
+import { makeTempRoot, withRealRuntime, createScriptedSession, toolResults, toolContentTexts } from './harness.js';
 
-const hasRealRuntime = () => {
-  try {
-    const cfg = readCodexConfig();
-    return !cfg.missing?.length && fs.existsSync(cfg.command);
-  } catch {
-    return false;
-  }
-};
-
-const withRuntime = hasRealRuntime() ? describe : describe.skip;
-
-// The cell writes what the runtime handed it as request meta. If no meta
-// arrived, write a marker so the assertion fails loudly rather than on
-// undefined parsing.
-const META_PROBE_CELL =
-  "nodeRepl.write(typeof nodeRepl.requestMeta === 'undefined' ? 'NO_REQUEST_META' : JSON.stringify(nodeRepl.requestMeta));";
-
-withRuntime('turn metadata on every computer-use cell (observed by the cell)', () => {
+withRealRuntime('turn metadata on every computer-use cell (observed by the cell)', () => {
   // One directory for the whole suite, removed with every other test
   // directory when the test process exits (test/harness.js).
   const root = makeTempRoot('pi-cua-t5');
+  fs.mkdirSync(root, { recursive: true });
+
+  // The cell writes what the runtime handed it as request meta. If no meta
+  // arrived, write a marker so the assertion fails loudly rather than on
+  // undefined parsing.
+  const META_PROBE_CELL =
+    "nodeRepl.write(typeof nodeRepl.requestMeta === 'undefined' ? 'NO_REQUEST_META' : JSON.stringify(nodeRepl.requestMeta));";
 
   it('the cell sees params._meta turn metadata as nodeRepl.requestMeta with pi session id and a per-run turn id', async () => {
     const { session } = await createScriptedSession({

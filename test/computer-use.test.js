@@ -6,9 +6,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
-import { readCodexConfig } from '../src/config.mjs';
-import { makeTempRoot, createScriptedSession, toolResults, toolContentTexts, toolContentImages } from './harness.js';
+
+import {
+  makeTempRoot,
+  withRealRuntime,
+  realCodexInstallation,
+  createScriptedSession,
+  procSnapshot,
+  waitUntil,
+  toolResults,
+  toolContentTexts,
+  toolContentImages,
+} from './harness.js';
 
 // Capture the first open window the runtime will capture: which windows exist,
 // and whether they are minimized or browser windows (refused by the helper's
@@ -30,49 +39,17 @@ for (const window of await sky.list_windows()) {
 if (errors.length) throw new Error('no window could be captured: ' + errors.join('; '));
 `;
 
-const hasRealRuntime = () => {
-  try {
-    const cfg = readCodexConfig();
-    return !cfg.missing?.length && fs.existsSync(cfg.command);
-  } catch {
-    return false;
-  }
-};
-
-const withRuntime = hasRealRuntime() ? describe : describe.skip;
-
-function procSnapshot() {
-  const out = execSync(
-    'powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress"',
-    { encoding: 'utf8' },
-  );
-  const arr = JSON.parse(out);
-  return Array.isArray(arr) ? arr : [arr];
-}
-
-async function waitUntil(pred, timeoutMs, stepMs = 200) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (pred()) return true;
-    await new Promise((r) => setTimeout(r, stepMs));
-  }
-  return pred();
-}
-
-// A cell enumerating the desktop apps through sky, as the model would write
-// it (the same shape ComputerUse.listApps uses).
-const LIST_APPS_CELL = `nodeRepl.write(JSON.stringify(await globalThis.sky.list_apps()));`;
-
-withRuntime('run a cell in the Codex REPL from pi', () => {
+withRealRuntime('run a cell in the Codex REPL from pi', () => {
   // One directory for the whole suite, removed with every other test
   // directory when the test process exits (test/harness.js).
   const root = makeTempRoot();
+  fs.mkdirSync(root, { recursive: true });
 
   it('criterion 1: scripted list-apps cell returns apps as text', async () => {
     const { session } = await createScriptedSession({
       cwd: root,
       scripts: [
-        { kind: 'tool', name: 'computer_use', args: { code: LIST_APPS_CELL } },
+        { kind: 'tool', name: 'computer_use', args: { code: 'nodeRepl.write(JSON.stringify(await globalThis.sky.list_apps()));' } },
         { kind: 'text', text: 'listed apps' },
       ],
     });
@@ -207,7 +184,9 @@ withRuntime('run a cell in the Codex REPL from pi', () => {
   });
 
   it('criterion 6: REPL session runs a cell with the config untouched and the routing variables deleted', async () => {
-    const configPath = readCodexConfig().file;
+    // The harness parsed the config path without the package's code.
+    const real = realCodexInstallation();
+    const configPath = real.file;
     const before = fs.readFileSync(configPath);
     // Plant the three app-routing variables with deliberately bogus values in
     // the TEST process env (the base the host merges the Codex config over).
@@ -234,7 +213,7 @@ withRuntime('run a cell in the Codex REPL from pi', () => {
       await session.prompt('go');
       const results = toolResults(session);
       assert.ok(!results[0]?.isError, `cell failed: ${toolContentTexts(results[0])}`);
-      const observed = JSON.parse(toolContentTexts(results[0]));
+      const observed = lastJsonObject(toolContentTexts(results[0]));
       // Temp directory pointed at the host's writable tmp dir (observable).
       assert.equal(
         path.resolve(observed.tmpDir),
@@ -272,3 +251,13 @@ withRuntime('run a cell in the Codex REPL from pi', () => {
     assert.deepEqual(offenders, [], `host files referencing pi: ${offenders.join(', ')}`);
   });
 });
+
+function lastJsonObject(text) {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lines[i].startsWith('{')) {
+      try { return JSON.parse(lines[i]); } catch { /* keep looking */ }
+    }
+  }
+  return {};
+}

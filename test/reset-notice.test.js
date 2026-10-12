@@ -4,24 +4,22 @@
 // text is asserted as the literal text the model sees, not via the package's
 // constant (docs/runtime-behavior.md, "Cells": the notice reads
 // 'Codex REPL state was reset: a new REPL was started.').
+// Every fact is observed through the session seam; no test imports a module
+// of the package. Needs the real runtime on this machine and skips visibly
+// without it (criterion 2 of issue #11).
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import { spawn, execSync } from 'node:child_process';
 
-import { readCodexConfig } from '../src/config.mjs';
-import { makeTempRoot, createScriptedSession, toolResults, toolContentTexts } from './harness.js';
-
-const hasRealRuntime = () => {
-  try {
-    const cfg = readCodexConfig();
-    return !cfg.missing?.length && fs.existsSync(cfg.command);
-  } catch {
-    return false;
-  }
-};
-
-const withRuntime = hasRealRuntime() ? describe : describe.skip;
+import {
+  makeTempRoot,
+  createScriptedSession,
+  toolResults,
+  toolContentTexts,
+  withRealRuntime,
+  killTree,
+  replProcPids,
+  waitUntil,
+} from './harness.js';
 
 const RESET_NOTICE_TEXT = 'Codex REPL state was reset: a new REPL was started.';
 const countNotice = (text) => text.split(RESET_NOTICE_TEXT).length - 1;
@@ -32,37 +30,7 @@ const countNotice = (text) => text.split(RESET_NOTICE_TEXT).length - 1;
 const FRESH_CHECK_CELL =
   "nodeRepl.write(JSON.stringify({ carried: globalThis.__noticeProbe ?? null, sky: typeof globalThis.sky }));";
 
-function killTree(pid) {
-  return new Promise((resolve) => {
-    const t = spawn('taskkill', ['/pid', String(pid), '/T', '/F']);
-    t.on('exit', resolve);
-    t.on('error', resolve);
-  });
-}
-
-async function waitUntil(pred, timeoutMs, stepMs = 100) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (pred()) return true;
-    await new Promise((r) => setTimeout(r, stepMs));
-  }
-  return pred();
-}
-
-function procSnapshot() {
-  const out = execSync(
-    'powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress"',
-    { encoding: 'utf8' },
-  );
-  const arr = JSON.parse(out);
-  return Array.isArray(arr) ? arr : [arr];
-}
-
-function replProcPids() {
-  return procSnapshot().filter((p) => /node_repl/i.test(p.Name ?? '')).map((p) => p.ProcessId);
-}
-
-withRuntime('the reset notice appears exactly once per new REPL', () => {
+withRealRuntime('the reset notice appears exactly once per new REPL', () => {
   // One directory for the whole suite, removed with every other test
   // directory when the test process exits (test/harness.js).
   const root = makeTempRoot('pi-cua-t7');

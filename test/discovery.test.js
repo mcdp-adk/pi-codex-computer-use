@@ -1,14 +1,23 @@
-// Tests for the completeness discovery and skill shipping. Drives the full
-// pi SDK session via the package discovery harness, with a doctored
-// CODEX_HOME so discovery actually fails — no test-only backdoors, no direct
-// session method calls.
+// Tests for the Codex installation discovery, exercised only through a pi
+// session: the discovery decides which tools the session registers and what
+// its computer_use description names, so the sessions here assert exactly
+// that. A fake Codex installation, a temporary directory named by CODEX_HOME
+// and written by the test, sits behind the session seam (story 22: the test
+// spells out Codex's file layout itself, not borrowing the package's
+// constants). No test imports a module of the package.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { discover } from '../src/discovery.mjs';
-import { readCodexConfig } from '../src/config.mjs';
-import { createScriptedSessionFromPackage, makeTempRoot, toolResults, toolContentTexts } from './harness.js';
+
+import {
+  makeTempRoot,
+  createScriptedSessionFromPackage,
+  realCodexInstallation,
+  withRealRuntime,
+  toolResults,
+  toolContentTexts,
+} from './harness.js';
 import { SettingsManager, DefaultPackageManager, DefaultResourceLoader } from '@earendil-works/pi-coding-agent';
 
 // Builds a CODEX_HOME shape on disk. `parts` toggles which pieces exist:
@@ -97,57 +106,53 @@ describe('skill registration: the pi manifest ships the codex-computer-use skill
     }
   });
 });
+
 describe('completeness discovery: tools only exist when the Codex installation is complete', () => {
-  // Needs a real installation to discover; skips visibly without one (e.g. on
-  // a CI runner), like the runtime-gated suites elsewhere in this directory.
-  const withRealInstall = (() => {
-    try {
-      const cfg = readCodexConfig();
-      return !cfg.missing?.length && fs.existsSync(cfg.command) ? describe : describe.skip;
-    } catch {
-      return describe.skip;
-    }
-  })();
-
-  withRealInstall('discovers a complete installation with all three docs', () => {
-    it('discovers a complete installation with all three docs', () => {
-      const found = discover();
-      assert.ok(found.ok, `real install should be complete; missing: ${found.missing?.join('; ')}`);
-      assert.ok(found.repl?.command, 'repl command resolved');
-      assert.equal(path.basename(found.docs?.skyReference), 'sky-window2-api.md');
-      assert.equal(path.basename(found.docs?.guidance), 'guidance.md');
-      assert.equal(path.basename(found.docs?.confirmationPolicy), 'confirmations.md');
-    });
-  });
-
-  it('a missing piece makes discovery incomplete and names it', () => {
+  it('a missing piece makes discovery incomplete and names it', async () => {
     const missingHome = fakeCodexHome('no-guidance', { replEntry: true, marketplace: false });
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = missingHome;
     try {
-      const found = discover();
-      assert.equal(found.ok, false, 'install without the guidance is incomplete');
-      assert.ok(found.missing.length > 0, 'must name what is missing');
-      assert.ok(
-        found.missing.some((m) => /guidance/i.test(m)),
-        `missing list should name the guidance, got: ${found.missing.join('; ')}`,
-      );
+      const { session } = await createScriptedSessionFromPackage({
+        cwd: makeTempRoot('pi-cua-no-guidance-disc'),
+        scripts: [ { kind: 'text', text: 'done' } ],
+      });
+      try {
+        await session.prompt('try computer use');
+        const notices = session.notifications.map((n) => n.message);
+        assert.equal(notices.length, 1, `exactly one notice expected, got: ${JSON.stringify(notices)}`);
+        assert.match(notices[0], /guidance/i, `notice should name the guidance, got: ${notices[0]}`);
+      } finally {
+        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+        session.dispose();
+      }
     } finally {
       if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
     }
   });
 
-  it('a bare manifest without the export entry makes discovery incomplete', () => {
+  it('a bare manifest without the export entry makes discovery incomplete', async () => {
     const missingHome = fakeCodexHome('no-sky-entry', { replEntry: true, marketplace: true, skyEntry: false });
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = missingHome;
     try {
-      const found = discover();
-      assert.equal(found.ok, false, 'manifest without its export entry must be incomplete');
-      assert.ok(
-        found.missing.some((m) => /sky module|@oai\/sky/i.test(m)),
-        `missing list should name the sky package, got: ${found.missing.join('; ')}`,
-      );
+      const { session } = await createScriptedSessionFromPackage({
+        cwd: makeTempRoot('pi-cua-no-sky-entry'),
+        scripts: [ { kind: 'text', text: 'done' } ],
+      });
+      try {
+        await session.prompt('try computer use');
+        const notices = session.notifications.map((n) => n.message);
+        assert.equal(notices.length, 1, `exactly one notice expected, got: ${JSON.stringify(notices)}`);
+        assert.match(
+          notices[0],
+          /sky module|@oai\/sky/i,
+          `notice should name the sky package, got: ${notices[0]}`,
+        );
+      } finally {
+        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+        session.dispose();
+      }
     } finally {
       if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
     }
@@ -220,59 +225,35 @@ describe('completeness discovery: tools only exist when the Codex installation i
     }
   });
 
-  it('valid home through a package session: computer_use runs against the real runtime and carries turn metadata', async (t) => {
-    // Skip visibly before building anything: this case needs a real runtime;
-    // a silent return would look like a vacuous pass.
-    const real = readCodexConfig();
-    if (real.missing?.length || !real.command || !real.env?.NODE_REPL_NODE_MODULE_DIRS) {
-      t.skip('needs a real Codex runtime to drive');
-      return;
-    }
-    const cwdHome = fakeCodexHome('valid', { replEntry: true, marketplace: true });
+  it('a complete installation registers the tools and the computer_use description names all three documents', async () => {
+    // Complete on disk; the scripts hold no tool call, so no REPL launches —
+    // registration and the description come from discovery alone.
     const prev = process.env.CODEX_HOME;
-    const nm = String(real.env.NODE_REPL_NODE_MODULE_DIRS).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
-    const command = String(real.command).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
-    // The runtime resolves @oai/sky/service only from a trusted module
-    // directory, which the real config names via NODE_REPL_TRUSTED_CODE_PATHS;
-    // a migrated home carries the real env, so copy it too.
-    const tcp = String(real.env.NODE_REPL_TRUSTED_CODE_PATHS).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
-    const cfgToml = fs.readFileSync(path.join(cwdHome, 'config.toml'), 'utf8');
-    fs.writeFileSync(path.join(cwdHome, 'config.toml'), cfgToml
-      .replace(/command = '.*'/, `command = '${command}'`)
-      .replace(/NODE_REPL_NODE_MODULE_DIRS = '.*'/, `NODE_REPL_NODE_MODULE_DIRS = '${nm}'\nNODE_REPL_TRUSTED_CODE_PATHS = '${tcp}'`));
-    process.env.CODEX_HOME = cwdHome;
-    const cwd = makeTempRoot('pi-cua-test-3-ok');
+    process.env.CODEX_HOME = fakeCodexHome('complete', { replEntry: true, marketplace: true });
+    const cwd = makeTempRoot('pi-cua-complete-nolaunch');
     try {
       const { session } = await createScriptedSessionFromPackage({
         cwd,
-        scripts: [
-          { kind: 'tool', name: 'computer_use', args: { code: 'nodeRepl.write(JSON.stringify(await globalThis.sky.list_apps()).slice(0, 80));' } },
-          { kind: 'tool', name: 'computer_use', args: { code: "nodeRepl.write(JSON.stringify(nodeRepl.requestMeta ?? 'NO_META'));" } },
-          { kind: 'text', text: 'done' },
-        ],
+        scripts: [ { kind: 'text', text: 'done' } ],
       });
       try {
-        await session.prompt('run a cell');
-        const toolNames = session.getActiveToolNames();
-        assert.ok(toolNames.includes('computer_use'), 'computer_use visible when the install is complete');
-
-        const results = toolResults(session);
-        assert.equal(results.length, 2, `expected 2 toolResults, got ${results.length}`);
-        // Criterion 3: a call that lists apps succeeds against this home.
-        assert.ok(!results[0]?.isError, `list-apps cell failed: ${toolContentTexts(results[0])}`);
-        assert.match(
-          toolContentTexts(results[0]),
-          /id|title|displayName|app/i,
-          `list-apps cell returned no app text: ${toolContentTexts(results[0]).slice(0, 200)}`,
+        await session.prompt('try computer use');
+        const allNames = session.getAllTools().map((t) => t.name);
+        assert.deepEqual(
+          allNames.filter((n) => n.startsWith('computer_use')),
+          ['computer_use', 'computer_use_reset'],
+          'a complete installation registers exactly the two computer-use tools',
         );
-        const text = toolContentTexts(results[1]);
-        // The runtime may echo non-JSON lines before the cell's write; take
-        // the last line that looks like the meta object.
-        const jsonLine = text.split('\n').filter((l) => l.trim().startsWith('{')).pop();
-        const meta = jsonLine ? JSON.parse(jsonLine)['x-codex-turn-metadata'] : undefined;
-        assert.ok(meta, `second cell carried no turn metadata: ${text.slice(0, 200)}`);
-        assert.ok(meta.turn_id, 'cell carries a per-run turn id');
-        assert.equal(meta.session_id, session.sessionManager.getSessionId(), 'session_id is pi session id');
+        const computerUse = session.getAllTools().find((t) => t.name === 'computer_use');
+        const d = computerUse.description;
+        assert.match(d, /codex-computer-use/, 'description must tell the model to load the skill');
+        assert.match(d, /computer_use_guidance_path/, 'description must name the guidance document');
+        assert.match(d, /computer_use_confirmations_path/, 'description must name the confirmation policy');
+        assert.match(d, /computer_use_sky_api_path/, 'description must name the sky API reference');
+        const skyDoc = path.join(process.env.CODEX_HOME, 'bin', 'node_modules', '@oai', 'sky', 'docs', 'sky-window2-api.md');
+        assert.ok(d.includes(skyDoc), `description names the fake home's sky reference ${skyDoc}`);
+        assert.ok(d.includes('guidance.md'), 'description names the guidance document');
+        assert.ok(d.includes('confirmations.md'), 'description names the confirmation policy');
       } finally {
         await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
         session.dispose();
@@ -280,5 +261,63 @@ describe('completeness discovery: tools only exist when the Codex installation i
     } finally {
       if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
     }
+  });
+
+  withRealRuntime('against the real home: computer_use runs and carries turn metadata', () => {
+    it('valid home through a package session: computer_use runs against the real runtime and carries turn metadata', async () => {
+      // The runtime resolves @oai/sky/service only from a trusted module
+      // directory, which the real config names via NODE_REPL_TRUSTED_CODE_PATHS;
+      // a migrated home carries the real env, so copy it too.
+      const real = realCodexInstallation();
+      const cwdHome = fakeCodexHome('valid', { replEntry: true, marketplace: true });
+      const prev = process.env.CODEX_HOME;
+      const nm = String(real.env.NODE_REPL_NODE_MODULE_DIRS).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
+      const command = String(real.command).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
+      const tcp = String(real.env.NODE_REPL_TRUSTED_CODE_PATHS).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
+      const cfgToml = fs.readFileSync(path.join(cwdHome, 'config.toml'), 'utf8');
+      fs.writeFileSync(path.join(cwdHome, 'config.toml'), cfgToml
+        .replace(/command = '.*'/, `command = '${command}'`)
+        .replace(/NODE_REPL_NODE_MODULE_DIRS = '.*'/, `NODE_REPL_NODE_MODULE_DIRS = '${nm}'\nNODE_REPL_TRUSTED_CODE_PATHS = '${tcp}'`));
+      process.env.CODEX_HOME = cwdHome;
+      const cwd = makeTempRoot('pi-cua-test-3-ok');
+      try {
+        const { session } = await createScriptedSessionFromPackage({
+          cwd,
+          scripts: [
+            { kind: 'tool', name: 'computer_use', args: { code: 'nodeRepl.write(JSON.stringify(await globalThis.sky.list_apps()).slice(0, 80));' } },
+            { kind: 'tool', name: 'computer_use', args: { code: "nodeRepl.write(JSON.stringify(nodeRepl.requestMeta ?? 'NO_META'));" } },
+            { kind: 'text', text: 'done' },
+          ],
+        });
+        try {
+          await session.prompt('run a cell');
+          const toolNames = session.getActiveToolNames();
+          assert.ok(toolNames.includes('computer_use'), 'computer_use visible when the install is complete');
+
+          const results = toolResults(session);
+          assert.equal(results.length, 2, `expected 2 toolResults, got ${results.length}`);
+          // A call that lists apps succeeds against this home.
+          assert.ok(!results[0]?.isError, `list-apps cell failed: ${toolContentTexts(results[0])}`);
+          assert.match(
+            toolContentTexts(results[0]),
+            /id|title|displayName|app/i,
+            `list-apps cell returned no app text: ${toolContentTexts(results[0]).slice(0, 200)}`,
+          );
+          const text = toolContentTexts(results[1]);
+          // The runtime may echo non-JSON lines before the cell's write; take
+          // the last line that looks like the meta object.
+          const jsonLine = text.split('\n').filter((l) => l.trim().startsWith('{')).pop();
+          const meta = jsonLine ? JSON.parse(jsonLine)['x-codex-turn-metadata'] : undefined;
+          assert.ok(meta, `second cell carried no turn metadata: ${text.slice(0, 200)}`);
+          assert.ok(meta.turn_id, 'cell carries a per-run turn id');
+          assert.equal(meta.session_id, session.sessionManager.getSessionId(), 'session_id is pi session id');
+        } finally {
+          await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+          session.dispose();
+        }
+      } finally {
+        if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
+      }
+    });
   });
 });
