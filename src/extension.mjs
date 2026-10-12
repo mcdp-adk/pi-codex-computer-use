@@ -3,12 +3,10 @@
 // lifecycle. This file is pi's entry point; src/ carries the host logic and
 // never imports pi.
 import { ComputerUse } from './computer-use.mjs';
-import { TurnMeta } from './turn-meta.mjs';
 import { locateInstallation } from './installation.mjs';
 
 export default function (pi) {
   const computerUse = new ComputerUse();
-  const turnMeta = new TurnMeta();
 
   // The installation is looked up once at factory time: it decides whether
   // the tools are registered at all, and the description refers to real
@@ -17,12 +15,13 @@ export default function (pi) {
   const found = locateInstallation();
 
   if (found.ok) {
-    registerTools(pi, { computerUse, turnMeta, installation: found });
+    registerTools(pi, { computerUse, installation: found });
   }
 
+  // Forward pi's session and agent-run events to the host module.
   pi.on('session_start', (_event, ctx) => {
     // SSOT: the pi session id names this host session to the runtime.
-    if (ctx?.sessionManager?.getSessionId) turnMeta.setSessionId(ctx.sessionManager.getSessionId());
+    if (ctx?.sessionManager?.getSessionId) computerUse.setSessionId(ctx.sessionManager.getSessionId());
     // An incomplete install registers nothing and shows one notice naming
     // what is missing, sent through pi's ui surface.
     if (!found.ok && ctx?.ui?.notify) ctx.ui.notify(missingNotice(found.missing), 'warning');
@@ -31,7 +30,7 @@ export default function (pi) {
   // Each agent run (each prompt) begins a fresh run identity; every
   // cell in it carries the run's Codex-style turn metadata.
   pi.on('agent_start', () => {
-    turnMeta.beginRun();
+    computerUse.beginRun();
   });
 
   // Run over — settled normally or aborted (physical Escape aborts the run):
@@ -40,10 +39,7 @@ export default function (pi) {
   // (the REPL can be busy with the just-aborted cell for up to 5s) would stall
   // the run's settle; the host itself swallows its transport errors.
   pi.on('agent_settled', (event) => {
-    const turnId = turnMeta.endRun();
-    if (!turnId) return;
-    const meta = { session_id: turnMeta.sessionId, turn_id: turnId };
-    computerUse.endRun(meta, { aborted: Boolean(event?.aborted) }).catch(() => {});
+    computerUse.endRun(Boolean(event?.aborted)).catch(() => {});
   });
 
   // Kill the REPL process tree when the pi session ends. Returning the promise
@@ -54,7 +50,7 @@ export default function (pi) {
 // The two model-facing tools, registered only when the installation lookup
 // found a complete installation. The computer_use description names the
 // located guidance files, so the model reads the real Codex documents.
-function registerTools(pi, { computerUse, turnMeta, installation }) {
+function registerTools(pi, { computerUse, installation }) {
   const guidanceBlurb = ` Codex guidance: operating rules \`${installation.guidancePath}\` (computer_use_guidance_path), confirmation policy \`${installation.confirmationPolicyPath}\` (computer_use_confirmations_path), sky API reference \`${installation.skyReferencePath}\` (computer_use_sky_api_path).`;
 
   pi.registerTool({
@@ -76,14 +72,11 @@ function registerTools(pi, { computerUse, turnMeta, installation }) {
     executionMode: 'sequential',
     execute: async (_toolCallId, params, signal) => {
       try {
-        const meta = turnMeta.cellMeta();
-        if (!meta.turn_id) throw new Error('computer-use has no active agent run; start a prompt first');
-        const { text, content } = await computerUse.runCell(params.code, {
+        const content = await computerUse.runCell(params.code, {
           signal,
           timeoutMs: params.timeout_ms,
-          turnMeta: meta,
         });
-        return { content: content ?? [{ type: 'text', text }], details: undefined };
+        return { content, details: undefined };
       } catch (err) {
         return errorResult('computer_use', err);
       }
@@ -99,8 +92,6 @@ function registerTools(pi, { computerUse, turnMeta, installation }) {
     executionMode: 'sequential',
     execute: async () => {
       try {
-        const meta = turnMeta.cellMeta();
-        if (!meta.turn_id) throw new Error('computer-use has no active agent run; start a prompt first');
         await computerUse.reset();
         return { content: [{ type: 'text', text: 'Codex REPL reset: a fresh REPL starts on the next cell.' }], details: undefined };
       } catch (err) {
