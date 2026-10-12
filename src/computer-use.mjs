@@ -35,7 +35,10 @@ export class ComputerUse {
     } catch (err) {
       // The notice still rides along when the cell errors: the model
       // sees that the state came from a fresh REPL, not the one it knew.
+      // The FIRST cell result consumes it whatever its outcome, so a
+      // later cell is not told again that the state was reset.
       if (this.resetNotice) {
+        this.resetNotice = false;
         const message = err instanceof Error ? err.message : String(err);
         err = new Error(`${RESET_NOTICE}\n${message}`);
       }
