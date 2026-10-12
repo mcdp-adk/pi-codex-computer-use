@@ -190,6 +190,18 @@ export function toolContentImages(result) {
   return (result?.content ?? []).filter((c) => c.type === 'image');
 }
 
+// The last line of cell output that parses as a JSON object — the cell's own
+// write, after any runtime echo lines.
+export function lastJsonObject(text) {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lines[i].startsWith('{')) {
+      try { return JSON.parse(lines[i]); } catch { /* keep looking */ }
+    }
+  }
+  return {};
+}
+
 // ---- The real Codex installation ----
 
 // The harness's own reading of the real Codex installation — deliberately not
