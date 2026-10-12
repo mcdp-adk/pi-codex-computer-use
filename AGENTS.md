@@ -6,6 +6,10 @@
 - **Triage labels**: the five defaults: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
 - **Domain docs**: single context, with `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+## Runtime behavior
+
+Before relying on how the Codex runtime or pi behaves, read `docs/runtime-behavior.md`; record what you establish there, with its evidence.
+
 ## Workspace
 
 The tracked tree holds only what the repo shares. Anything else an agent creates lives in one of two homes and is removed once it has served its purpose:
