@@ -105,10 +105,11 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
     }
   });
 
-  it('a missing config file is reported to the model, not thrown', async () => {
+  it('a missing config file is reported as one session notice naming it', async () => {
     // The home exists; its config.toml does not. The session starts anyway
-    // (no tools, nothing to launch): the model sees one notice naming the
-    // missing config file.
+    // (no tools, nothing to launch): one notice naming the missing config
+    // file is sent through pi's ui surface, the same path pi's CLI shows
+    // the user.
     const home = makeTempRoot('codex-home-missing-file');
     const restore = setCodeHome(home);
     try {
@@ -130,7 +131,7 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
     }
   });
 
-  it('an unparseable config file is reported to the model, not thrown', async () => {
+  it('an unparseable config file is reported as one session notice naming the parse failure', async () => {
     // A file that is not TOML: the session still starts and one notice names
     // the file and why it could not be used.
     const home = makeTempRoot('codex-home-unparseable');
