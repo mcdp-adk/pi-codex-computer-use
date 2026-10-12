@@ -98,17 +98,30 @@ describe('skill registration: the pi manifest ships the codex-computer-use skill
   });
 });
 describe('completeness discovery: tools only exist when the Codex installation is complete', () => {
-  it('discovers a complete installation with all three docs', () => {
-    const found = discover();
-    assert.ok(found.ok, `real install should be complete; missing: ${found.missing?.join('; ')}`);
-    assert.ok(found.repl?.command, 'repl command resolved');
-    assert.equal(path.basename(found.docs?.skyReference), 'sky-window2-api.md');
-    assert.equal(path.basename(found.docs?.guidance), 'guidance.md');
-    assert.equal(path.basename(found.docs?.confirmationPolicy), 'confirmations.md');
+  // Needs a real installation to discover; skips visibly without one (e.g. on
+  // a CI runner), like the runtime-gated suites elsewhere in this directory.
+  const withRealInstall = (() => {
+    try {
+      const cfg = readCodexConfig();
+      return !cfg.missing?.length && fs.existsSync(cfg.command) ? describe : describe.skip;
+    } catch {
+      return describe.skip;
+    }
+  })();
+
+  withRealInstall('discovers a complete installation with all three docs', () => {
+    it('discovers a complete installation with all three docs', () => {
+      const found = discover();
+      assert.ok(found.ok, `real install should be complete; missing: ${found.missing?.join('; ')}`);
+      assert.ok(found.repl?.command, 'repl command resolved');
+      assert.equal(path.basename(found.docs?.skyReference), 'sky-window2-api.md');
+      assert.equal(path.basename(found.docs?.guidance), 'guidance.md');
+      assert.equal(path.basename(found.docs?.confirmationPolicy), 'confirmations.md');
+    });
   });
 
-  it('a missing piece makes discovery incomplete and names it', (t) => {
-    const missingHome = fakeCodexHome(t, 'no-guidance', { replEntry: true, marketplace: false });
+  it('a missing piece makes discovery incomplete and names it', () => {
+    const missingHome = fakeCodexHome('no-guidance', { replEntry: true, marketplace: false });
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = missingHome;
     try {

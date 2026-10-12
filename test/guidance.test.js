@@ -8,6 +8,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { discover } from '../src/discovery.mjs';
+import { readCodexConfig } from '../src/config.mjs';
 
 function extUrl() {
   return pathToFileURL(path.resolve(import.meta.dirname, '..', 'src', 'extension.mjs'));
@@ -23,7 +24,21 @@ function makePiStub() {
   };
 }
 
-describe('guide the model with the skill and Codex guidance', () => {
+const hasRealRuntime = () => {
+  try {
+    const cfg = readCodexConfig();
+    return !cfg.missing?.length && fs.existsSync(cfg.command);
+  } catch {
+    return false;
+  }
+};
+
+// The description is built at factory time from what discovery found: without
+// a real installation there are no tool registrations and no discovered
+// documents to assert on. Skips visibly, like the runtime-gated suites.
+const withRuntime = hasRealRuntime() ? describe : describe.skip;
+
+withRuntime('guide the model with the skill and Codex guidance', () => {
   let mod, pi;
   before(async () => {
     mod = await import(extUrl().href + '?t4=' + Date.now());
