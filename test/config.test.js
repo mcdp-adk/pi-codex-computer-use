@@ -105,6 +105,56 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
     }
   });
 
+  it('a missing config file is reported to the model, not thrown', async () => {
+    // The home exists; its config.toml does not. The session starts anyway
+    // (no tools, nothing to launch): the model sees one notice naming the
+    // missing config file.
+    const home = makeTempRoot('codex-home-missing-file');
+    const restore = setCodeHome(home);
+    try {
+      const { session } = await createScriptedSession({
+        cwd: root,
+        scripts: [{ kind: 'text', text: 'done' }],
+      });
+      try {
+        await session.prompt('try computer use');
+        assert.equal(session.notifications.length, 1, `one notice expected, got: ${JSON.stringify(session.notifications)}`);
+        assert.match(session.notifications[0].message, /incomplete/, 'the notice must say the installation is incomplete');
+        assert.match(session.notifications[0].message, /config\.toml/, 'the notice must name the missing config file');
+      } finally {
+        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+        session.dispose();
+      }
+    } finally {
+      restore();
+    }
+  });
+
+  it('an unparseable config file is reported to the model, not thrown', async () => {
+    // A file that is not TOML: the session still starts and one notice names
+    // the file and why it could not be used.
+    const home = makeTempRoot('codex-home-unparseable');
+    fs.writeFileSync(path.join(home, 'config.toml'), 'this is not TOML ]]\\][');
+    const restore = setCodeHome(home);
+    try {
+      const { session } = await createScriptedSession({
+        cwd: root,
+        scripts: [{ kind: 'text', text: 'done' }],
+      });
+      try {
+        await session.prompt('try computer use');
+        assert.equal(session.notifications.length, 1, `one notice expected, got: ${JSON.stringify(session.notifications)}`);
+        assert.match(session.notifications[0].message, /incomplete/, 'the notice must say the installation is incomplete');
+        assert.match(session.notifications[0].message, /could not be parsed|parse/i, 'the notice must name the parse failure');
+      } finally {
+        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+        session.dispose();
+      }
+    } finally {
+      restore();
+    }
+  });
+
   it('tables other than [mcp_servers.node_repl] are ignored by the launch', async () => {
     const home = codexHome('other-tables', {
       topTables: `[desktop]
