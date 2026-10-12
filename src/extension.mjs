@@ -1,22 +1,23 @@
 // Pi extension: registers the two computer-use tools (computer_use,
 // computer_use_reset) against the Codex REPL, and reacts to pi's session
-// lifecycle. This file is pi's entry point; src/computer-use.mjs carries the
-// host logic and never imports pi.
+// lifecycle. This file is pi's entry point; src/ carries the host logic and
+// never imports pi.
 import { ComputerUse } from './computer-use.mjs';
 import { TurnMeta } from './turn-meta.mjs';
-import { discover } from './discovery.mjs';
+import { locateInstallation } from './installation.mjs';
 
 export default function (pi) {
   const computerUse = new ComputerUse();
   const turnMeta = new TurnMeta();
 
-  // Discovery runs once at factory time: it decides whether the tools are
-  // registered at all, and the description refers to real paths, not
-  // placeholders.
-  const found = discover();
+  // The installation is looked up once at factory time: it decides whether
+  // the tools are registered at all, and the description refers to real
+  // paths, not placeholders. Each REPL launch looks the installation up
+  // again (fresh), so a Codex update mid-session is picked up.
+  const found = locateInstallation();
 
   if (found.ok) {
-    registerTools(pi, { computerUse, turnMeta, docs: found.docs });
+    registerTools(pi, { computerUse, turnMeta, installation: found });
   }
 
   pi.on('session_start', (_event, ctx) => {
@@ -50,11 +51,11 @@ export default function (pi) {
   pi.on('session_shutdown', () => computerUse.close());
 }
 
-// The two model-facing tools, registered only when discovery found a complete
-// installation. The computer_use description names the located guidance
-// files, so the model reads the real Codex documents.
-function registerTools(pi, { computerUse, turnMeta, docs }) {
-  const guidanceBlurb = ` Codex guidance: operating rules \`${docs.guidance}\` (computer_use_guidance_path), confirmation policy \`${docs.confirmationPolicy}\` (computer_use_confirmations_path), sky API reference \`${docs.skyReference}\` (computer_use_sky_api_path).`;
+// The two model-facing tools, registered only when the installation lookup
+// found a complete installation. The computer_use description names the
+// located guidance files, so the model reads the real Codex documents.
+function registerTools(pi, { computerUse, turnMeta, installation }) {
+  const guidanceBlurb = ` Codex guidance: operating rules \`${installation.guidancePath}\` (computer_use_guidance_path), confirmation policy \`${installation.confirmationPolicyPath}\` (computer_use_confirmations_path), sky API reference \`${installation.skyReferencePath}\` (computer_use_sky_api_path).`;
 
   pi.registerTool({
     name: 'computer_use',

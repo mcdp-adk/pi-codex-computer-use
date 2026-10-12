@@ -4,7 +4,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { readCodexConfig } from './config.mjs';
+import { locateInstallation } from './installation.mjs';
 import { McpClient } from '@earendil-works/pi-mcp';
 import { StdioTransport } from '@earendil-works/pi-mcp';
 
@@ -33,12 +33,14 @@ export class ReplHost {
     return this.client != null;
   }
 
-  // Launch nothing until the first cell. Returns true if the REPL started.
+  // Launch nothing until the first cell. Every launch performs a fresh
+  // installation lookup, so Codex's configuration is re-read whenever a
+  // REPL is launched — a Codex update mid-session is picked up.
   async ensureStarted({ signal } = {}) {
     if (this.client) return true;
-    const cfg = readCodexConfig();
-    if (cfg.missing) {
-      throw new Error(`Cannot start Codex REPL: missing ${cfg.missing.join('; ')}`);
+    const found = locateInstallation();
+    if (!found.ok) {
+      throw new Error(`Cannot start Codex REPL: missing ${found.missing.join('; ')}`);
     }
     // ADR 0002 launch recipe: the configured environment merged over the
     // current one, always with no arguments, minus the three variables that
@@ -47,7 +49,7 @@ export class ReplHost {
     // persisted. inheritEnv: false makes this merged, cleaned object the
     // child's whole environment — StdioTransport would otherwise re-merge
     // process.env and bring the deleted variables back.
-    const env = { ...process.env, ...cfg.env };
+    const env = { ...process.env, ...found.env };
     for (const k of ['SKY_CUA_NATIVE_PIPE', 'SKY_CUA_NATIVE_PIPE_DIRECTORY', 'CODEX_CLI_PATH']) {
       delete env[k];
     }
@@ -56,7 +58,7 @@ export class ReplHost {
     env.TMP = this.tmpDir;
     env.TEMP = this.tmpDir;
 
-    const transport = new StdioTransport({ command: cfg.command, args: [], env, inheritEnv: false });
+    const transport = new StdioTransport({ command: found.command, args: [], env, inheritEnv: false });
     const client = new McpClient({
       name: 'pi-codex-computer-use',
       version: '0.1.0',
