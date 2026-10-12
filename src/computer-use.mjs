@@ -2,8 +2,6 @@
 // against the desktop, returning MCP content blocks. Host-logic file: must
 // never import anything from pi. Zero dependencies.
 import { ReplHost, RESET_NOTICE } from './repl.mjs';
-import { readCodexConfig } from './config.mjs';
-import { checkSkyModule } from './sky-path.mjs';
 import { SKY_INIT_CELL } from './cells.mjs';
 
 export class ComputerUse {
@@ -46,11 +44,11 @@ export class ComputerUse {
     }
   }
 
+  // Ready sky in a new REPL: the launch's fresh installation lookup has
+  // already checked the module is present, so this only runs the init cell
+  // (the same one Codex's own Initialize runs).
   async ensureSky({ signal, turnMeta } = {}) {
     if (this.skyReady) return;
-    const cfg = readCodexConfig();
-    if (cfg.missing) throw new Error(`Cannot start Codex REPL: missing ${cfg.missing.join('; ')}`);
-    checkSkyModule(cfg.env);
     const r = await this.host.runCell(SKY_INIT_CELL, { timeoutMs: 30000, signal, turnMeta });
     if (r?.isError) throw new Error(`sky init failed: ${textOf(r)}`);
     this.skyReady = true;
