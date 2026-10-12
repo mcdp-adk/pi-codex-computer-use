@@ -7,23 +7,21 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-
 import { discover } from '../src/discovery.mjs';
 import { readCodexConfig } from '../src/config.mjs';
-import { createScriptedSessionFromPackage, toolResults, toolContentTexts } from './harness.js';
+import { createScriptedSessionFromPackage, makeTempRoot, removeTempRoot, toolResults, toolContentTexts } from './harness.js';
 import { SettingsManager, DefaultPackageManager, DefaultResourceLoader } from '@earendil-works/pi-coding-agent';
-import { ComputerUse } from '../src/computer-use.mjs';
-
-const makeTempRoot = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 
 // Builds a CODEX_HOME shape on disk. `parts` toggles which pieces exist:
 // config, replEntry (exe + config entry + sky package + sky API ref doc),
 // marketplace (guidance/confirmations), skyPkg (the @oai/sky package under
 // the node_modules the REPL env names), skyEntry (the package's export
 // entry file; off leaves a bare manifest, like a half-copied install).
-function fakeCodexHome(label, parts = {}) {
+// `t.after` removes the directory; every test removes what it creates.
+function fakeCodexHome(t, label, parts = {}) {
   const home = path.join(os.tmpdir(), `codex-home-${label}-${process.pid}-${Math.random().toString(36).slice(2)}`);
   fs.mkdirSync(home, { recursive: true });
+  t.after(() => removeTempRoot(home));
   const command = path.join(home, 'bin', 'node_repl.exe');
   const nm = path.join(home, 'bin', 'node_modules');
   let config = '';
@@ -72,7 +70,7 @@ describe('skill registration: the pi manifest ships the codex-computer-use skill
     }
   });
 
-  it('discovery: pi packagemanager/resourceLoader discover the skill', async () => {
+  it('discovery: pi packagemanager/resourceLoader discover the skill', async (t) => {
     const repoRoot = path.resolve(import.meta.dirname, '..');
     const settingsManager = SettingsManager.inMemory({ packages: [repoRoot] });
     const packageManager = new DefaultPackageManager({ cwd: repoRoot, agentDir: repoRoot, settingsManager, builtinExtensions: [] });
@@ -91,7 +89,7 @@ describe('skill registration: the pi manifest ships the codex-computer-use skill
     assert.ok(skill, `codex-computer-use not discovered; got: ${skills.map((s) => s.name).join(', ')}`);
     assert.ok(fs.existsSync(skill.filePath), 'skill filePath exists');
     // The session path (harness package loader) sees the same skills.
-    const cwd = makeTempRoot('pi-cua-skill');
+    const cwd = makeTempRoot('pi-cua-skill', t);
     const pkg = await createScriptedSessionFromPackage({ cwd, scripts: [] });
     try {
       const names = pkg.loader.getSkills().skills.map((s) => s.name);
@@ -111,8 +109,8 @@ describe('completeness discovery: tools only exist when the Codex installation i
     assert.equal(path.basename(found.docs?.confirmationPolicy), 'confirmations.md');
   });
 
-  it('a missing piece makes discovery incomplete and names it', () => {
-    const missingHome = fakeCodexHome('no-guidance', { replEntry: true, marketplace: false });
+  it('a missing piece makes discovery incomplete and names it', (t) => {
+    const missingHome = fakeCodexHome(t, 'no-guidance', { replEntry: true, marketplace: false });
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = missingHome;
     try {
@@ -128,8 +126,8 @@ describe('completeness discovery: tools only exist when the Codex installation i
     }
   });
 
-  it('a bare manifest without the export entry makes discovery incomplete', () => {
-    const missingHome = fakeCodexHome('no-sky-entry', { replEntry: true, marketplace: true, skyEntry: false });
+  it('a bare manifest without the export entry makes discovery incomplete', (t) => {
+    const missingHome = fakeCodexHome(t, 'no-sky-entry', { replEntry: true, marketplace: true, skyEntry: false });
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = missingHome;
     try {
@@ -144,10 +142,10 @@ describe('completeness discovery: tools only exist when the Codex installation i
     }
   });
 
-  it('incomplete install through a package session: no tools registered and one ui notice names every missing piece', async () => {
+  it('incomplete install through a package session: no tools registered and one ui notice names every missing piece', async (t) => {
     const prev = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = fakeCodexHome('empty');
-    const cwd = makeTempRoot('pi-cua-incomplete');
+    process.env.CODEX_HOME = fakeCodexHome(t, 'empty');
+    const cwd = makeTempRoot('pi-cua-incomplete', t);
     try {
       const { session } = await createScriptedSessionFromPackage({
         cwd,
@@ -178,10 +176,10 @@ describe('completeness discovery: tools only exist when the Codex installation i
     }
   });
 
-  it('missing guidance through a package session: no tools registered and one ui notice names the guidance', async () => {
+  it('missing guidance through a package session: no tools registered and one ui notice names the guidance', async (t) => {
     const prev = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = fakeCodexHome('no-guidance', { replEntry: true, marketplace: false });
-    const cwd = makeTempRoot('pi-cua-no-guidance');
+    process.env.CODEX_HOME = fakeCodexHome(t, 'no-guidance', { replEntry: true, marketplace: false });
+    const cwd = makeTempRoot('pi-cua-no-guidance', t);
     try {
       const { session } = await createScriptedSessionFromPackage({
         cwd,
@@ -212,7 +210,7 @@ describe('completeness discovery: tools only exist when the Codex installation i
   });
 
   it('valid home through a package session: computer_use runs against the real runtime and carries turn metadata', async (t) => {
-    const cwdHome = fakeCodexHome('valid', { replEntry: true, marketplace: true });
+    const cwdHome = fakeCodexHome(t, 'valid', { replEntry: true, marketplace: true });
     const prev = process.env.CODEX_HOME;
     // The fake home satisfies discovery (config entry + marketplace docs),
     // but its node_modules only carries a fake sky package that the real
@@ -237,7 +235,7 @@ describe('completeness discovery: tools only exist when the Codex installation i
       .replace(/command = '.*'/, `command = '${command}'`)
       .replace(/NODE_REPL_NODE_MODULE_DIRS = '.*'/, `NODE_REPL_NODE_MODULE_DIRS = '${nm}'\nNODE_REPL_TRUSTED_CODE_PATHS = '${tcp}'`));
     process.env.CODEX_HOME = cwdHome;
-    const cwd = makeTempRoot('pi-cua-test-3-ok');
+    const cwd = makeTempRoot('pi-cua-test-3-ok', t);
     try {
       const { session } = await createScriptedSessionFromPackage({
         cwd,
