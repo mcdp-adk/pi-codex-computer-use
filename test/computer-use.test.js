@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 
 import {
   makeTempRoot,
@@ -13,6 +14,7 @@ import {
   realCodexInstallation,
   createScriptedSession,
   procSnapshot,
+  killTree,
   waitUntil,
   toolResults,
   toolContentTexts,
@@ -20,24 +22,32 @@ import {
   lastJsonObject,
 } from './harness.js';
 
-// Capture the first open window the runtime will capture: which windows exist,
-// and whether they are minimized or browser windows (refused by the helper's
-// URL policy), depends on the developer's desktop.
-const SCREENSHOT_CELL = `
-const errors = [];
-for (const window of await sky.list_windows()) {
-  try {
-    const state = await sky.get_window_state({ window, include_screenshot: true, include_text: false });
-    if (state.screenshots?.length) {
-      nodeRepl.write(JSON.stringify({ window: window.title, screenshots: state.screenshots.length }));
-      errors.length = 0;
-      break;
-    }
-  } catch (error) {
-    errors.push(window.title + ': ' + error.message);
-  }
+// The test process opens a window of its own, so the claim does not depend
+// on the developer's desktop: an HTA in its own mshta process, titled with a
+// token only this run generated. sky lists it (it does not list a WinForms
+// form shown by powershell), and killing that one process closes it.
+function openOwnWindow(root) {
+  const title = 'PI16' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const hta = path.join(root, title + '.hta');
+  fs.writeFileSync(hta, `<html><head><title>${title}</title><hta:application border="thin" /></head><body>computer-use screenshot test</body></html>`);
+  return { title, pid: spawn('mshta.exe', [hta], { stdio: 'ignore' }).pid };
 }
-if (errors.length) throw new Error('no window could be captured: ' + errors.join('; '));
+
+async function closeOwnWindow(pid) {
+  await killTree(pid);
+  await waitUntil(() => !procSnapshot().some((p) => p.ProcessId === pid), 10000);
+}
+
+// The cell waits for the test's window to be listed, then captures it.
+const screenshotCell = (title) => `
+let window = null;
+for (let i = 0; i < 30 && !window; i++) {
+  window = (await sky.list_windows()).find((w) => w.title === '${title}') ?? null;
+  if (!window) await new Promise((resolve) => setTimeout(resolve, 500));
+}
+if (!window) throw new Error('the test window was never listed: ${title}');
+const state = await sky.get_window_state({ window, include_screenshot: true, include_text: false });
+nodeRepl.write(JSON.stringify({ window: window.title, screenshots: state.screenshots?.length ?? 0 }));
 `;
 
 withRealRuntime('run a cell in the Codex REPL from pi', () => {
@@ -69,26 +79,38 @@ withRealRuntime('run a cell in the Codex REPL from pi', () => {
     }
   });
 
-  it('criterion 2: scripted screenshot cell returns an image; approval auto-granted (no prompt)', async () => {
-    const { session } = await createScriptedSession({
-      cwd: root,
-      scripts: [
-        { kind: 'tool', name: 'computer_use', args: { code: SCREENSHOT_CELL } },
-        { kind: 'text', text: 'took screenshot' },
-      ],
-    });
+  it('criterion 2: a scripted cell captures the window the test opened, with no prompt', async () => {
+    const own = openOwnWindow(root);
     try {
-      await session.prompt('capture the screen');
-      const results = toolResults(session);
-      assert.equal(results.length, 1, `expected 1 toolResult, got ${results.length}`);
-      const images = toolContentImages(results[0]);
-      assert.ok(images.length >= 1, `expected >=1 image in tool result, got ${images.length} (${toolContentTexts(results[0]).slice(0, 200)})`);
-      assert.match(images[0].mimeType, /^image\//);
-      assert.ok(images[0].data.length > 100, 'image data suspiciously small');
-      assert.ok(!results[0].isError, 'screenshot tool result marked isError');
+      const { session } = await createScriptedSession({
+        cwd: root,
+        scripts: [
+          { kind: 'tool', name: 'computer_use', args: { code: screenshotCell(own.title) } },
+          { kind: 'text', text: 'took screenshot' },
+        ],
+      });
+      try {
+        await session.prompt('capture the window the test opened');
+        const results = toolResults(session);
+        assert.equal(results.length, 1, `expected 1 toolResult, got ${results.length}`);
+        assert.ok(!results[0].isError, `cell failed: ${toolContentTexts(results[0]).slice(0, 200)}`);
+        const observed = lastJsonObject(toolContentTexts(results[0]));
+        assert.equal(
+          observed.window,
+          own.title,
+          `cell did not capture the opened window: ${JSON.stringify(observed)}`,
+        );
+        assert.ok(observed.screenshots >= 1, `no screenshot of the opened window: ${JSON.stringify(observed)}`);
+        const images = toolContentImages(results[0]);
+        assert.ok(images.length >= 1, `expected >=1 image in tool result, got ${images.length} (${toolContentTexts(results[0]).slice(0, 200)})`);
+        assert.match(images[0].mimeType, /^image\//);
+        assert.ok(images[0].data.length > 100, 'image data suspiciously small');
+      } finally {
+        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+        session.dispose();
+      }
     } finally {
-      await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
-      session.dispose();
+      await closeOwnWindow(own.pid);
     }
   });
 

@@ -7,5 +7,8 @@
     "src/**/*.mjs",
     "test/**/*.{js,mjs}"
   ],
-  "includeEntryExports": true
+  "includeEntryExports": true,
+  "ignoreBinaries": [
+    "mshta.exe"
+  ]
 }
