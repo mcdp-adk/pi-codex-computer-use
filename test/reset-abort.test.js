@@ -37,7 +37,6 @@ withRealRuntime('reset, crash recovery, and abort', () => {
   // One directory for the whole suite, removed with every other test
   // directory when the test process exits (test/harness.js).
   const root = makeTempRoot('pi-cua-t6');
-  fs.mkdirSync(root, { recursive: true });
 
   it('criterion 1: after computer_use_reset earlier globalThis values are gone and the next call can use sky', async () => {
     const { session } = await createScriptedSession({
