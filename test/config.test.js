@@ -105,6 +105,85 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
     }
   });
 
+  it('a config change between agent runs is picked up at the next launch', async () => {
+    // One home, one session, two agent runs. The first cell runs against a
+    // REPL whose config is complete. Then the test rewrites the same home's
+    // config.toml so the sky module directory it names is bogus — a fresh
+    // installation lookup cannot complete — and computer_use_reset tears
+    // the REPL down. The next cell relaunches; only a re-read of the config
+    // can fail the launch with the new file's problem, and the failure names
+    // the cause (installation.mjs's fail-fast check). A host that kept the
+    // first launch's lookup would relaunch the old, valid configuration and
+    // the cell would succeed.
+    const home = codexHome('re-read', {
+      env: `NODE_REPL_TRUSTED_SERVICES = '${JSON.stringify({ sky: '@oai/sky/service' }).replace(/'/g, "\\'")}'`,
+    });
+    const restore = setCodexHome(home);
+    try {
+      const { session } = await createScriptedSession({
+        cwd: root,
+        scripts: [
+          { kind: 'tool', name: 'computer_use', args: { code: CONFIG_PROBE_CELL } },
+          { kind: 'text', text: 'done' },
+          { kind: 'tool', name: 'computer_use_reset' },
+          { kind: 'tool', name: 'computer_use', args: { code: CONFIG_PROBE_CELL } },
+          { kind: 'text', text: 'done' },
+        ],
+      });
+      try {
+        await session.prompt('run a cell');
+        const [first] = toolResults(session);
+        assert.ok(!first?.isError, `first cell failed: ${toolContentTexts(first)}`);
+        const firstText = toolContentTexts(first);
+        assert.ok(
+          !firstText.startsWith('Codex REPL state was reset'),
+          `the first cell must carry no reset notice: ${firstText}`,
+        );
+        const firstObserved = lastJsonObject(firstText);
+        assert.equal(firstObserved.trusted, 'object', 'sky missing on the first launch');
+
+        // The change: same home, same file, module directory now bogus.
+        const configToml = path.join(home, 'config.toml');
+        const before = fs.readFileSync(configToml, 'utf8');
+        const marker = 'NODE_REPL_NODE_MODULE_DIRS';
+        const start = before.indexOf(marker);
+        assert.ok(start >= 0, 'fixture drift: module-dirs line not found in the written config');
+        const lineEnd = before.indexOf('\n', start);
+        const bogusDirs = JSON.stringify(path.join(home, 'no-such-node_modules'));
+        const after = before.slice(0, start) + `${marker} = ${bogusDirs.replace(/\\/g, '\\\\')}` + before.slice(lineEnd);
+        fs.writeFileSync(configToml, after);
+
+        await session.prompt('reset the REPL and run the cell again');
+        const results = toolResults(session);
+        // The second run has two results: the reset, then the failed cell.
+        assert.equal(results.length, 3, `reset plus cell expected across the runs, got ${results.length}`);
+        const reset = results[1];
+        assert.ok(!reset.isError, `reset failed: ${toolContentTexts(reset)}`);
+        const second = results[2];
+        assert.equal(
+          second?.isError,
+          true,
+          `the relaunch ran despite the broken config (a stale cached lookup?): ${toolContentTexts(second)}`,
+        );
+        const secondText = toolContentTexts(second);
+        // The relaunch also announces itself: the reset's next cell result
+        // opens with the reset notice, even when the cell fails (the notice
+        // leads the error message after the tool's `failed:` prefix).
+        assert.match(secondText, /^computer_use failed: Codex REPL state was reset/, `failure carries no reset notice: ${secondText}`);
+        assert.match(
+          secondText,
+          /@oai\/sky/, 
+          `the failure must name the sky module the new config broke: ${secondText}`,
+        );
+      } finally {
+        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+        session.dispose();
+      }
+    } finally {
+      restore();
+    }
+  });
+
   it('a missing config file is reported as one session notice naming it', async () => {
     // The home exists; its config.toml does not. The session starts anyway
     // (no tools, nothing to launch): one notice naming the missing config
