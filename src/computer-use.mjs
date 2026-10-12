@@ -103,28 +103,19 @@ export class ComputerUse {
 
   // Run one model cell. `signal` is pi's AbortSignal, forwarded so the MCP
   // request cancels promptly on abort. Returns the runtime's content
-  // blocks. A pending reset notice rides along as the FIRST content block
-  // even when the cell fails.
+  // blocks. A pending reset notice rides along as the FIRST block of
+  // whatever the cell turns out to be — the content of a successful cell,
+  // the thrown error's message when it fails — and is settled exactly once
+  // either way.
   async runCell(code, { signal, timeoutMs } = {}) {
     this.#assertAgentRunActive();
     this.#noticeIfRelaunched();
-    try {
+    return this.#settleResetNotice(async () => {
       await this.#ensureSky({ signal });
       const r = await this.#cell(code, { signal, timeoutMs });
       if (r?.isError) throw new Error(textOf(r) || 'REPL cell failed');
-      return this.#serveResetNotice(r.content ?? []);
-    } catch (err) {
-      // The notice still rides along when the cell errors: the model
-      // sees that the state came from a fresh REPL, not the one it knew.
-      // The FIRST cell result consumes it whatever its outcome, so a
-      // later cell is not told again that the state was reset.
-      if (this.#resetNotice) {
-        this.#resetNotice = false;
-        const message = err instanceof Error ? err.message : String(err);
-        err = new Error(`${RESET_NOTICE}\n${message}`);
-      }
-      throw err;
-    }
+      return r.content ?? [];
+    });
   }
 
   // Reset: close the REPL and start fresh; the next cell relaunches it,
@@ -257,14 +248,28 @@ export class ComputerUse {
     if (!this.#turnId) throw new Error('computer-use has no active agent run; start a prompt first');
   }
 
-  // Serve a pending reset notice on a successful cell result: it rides along
-  // as the FIRST content block (the extension passes content through
-  // verbatim, so putting it in the thrown message alone would drop it from
-  // the model's tool result).
-  #serveResetNotice(content) {
-    if (!this.#resetNotice) return content;
-    this.#resetNotice = false;
-    return [{ type: 'text', text: RESET_NOTICE }, ...content];
+  // The one place the reset notice is settled for a cell, whatever its
+  // outcome: the callback is the cell's work, and its result (success or
+  // thrown error) carries the pending notice — leading the returned content
+  // blocks on success, leading the error message on failure. One site, so
+  // the two paths cannot drift apart. The extension passes successful
+  // content through verbatim, so on success the notice must ride as a text
+  // block — putting it in a thrown message alone would drop it from the
+  // model's tool result. A transient failure between the REPL dying and the
+  // relaunch happens once for one cell: settle first, then rethrow, so the
+  // next cell is not told again that the state was reset.
+  async #settleResetNotice(run) {
+    try {
+      const content = await run();
+      if (!this.#resetNotice) return content;
+      this.#resetNotice = false;
+      return [{ type: 'text', text: RESET_NOTICE }, ...content];
+    } catch (err) {
+      if (!this.#resetNotice) throw err;
+      this.#resetNotice = false;
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`${RESET_NOTICE}\n${message}`);
+    }
   }
 
   // Tear the REPL process tree down: drop the launch first (a failure or a
