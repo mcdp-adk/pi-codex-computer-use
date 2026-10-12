@@ -1,6 +1,6 @@
 # Coding standards
 
-How code in this repo is written, for whoever writes or reviews it. A rule marked *checked* is enforced by a check, which has the final say; review the rest by judgement.
+How code in this repo is written, for whoever writes or reviews it. Collaboration conventions — issues, commits, and pull requests — live in `CONTRIBUTING.md`; this file covers code only. A rule marked *checked* is enforced by a check, which has the final say; review the rest by judgement.
 
 ## Design
 
@@ -27,8 +27,3 @@ A test exists to buy confidence that the package works when the user really uses
 
 - **Supported facts only.** The skill and the tool descriptions state only what the code or `docs/runtime-behavior.md` supports, and the skill lists only differences from the Codex guidance (ADR 0004).
 - **New runtime facts are recorded.** A change that relies on Codex runtime or pi behavior not yet in `docs/runtime-behavior.md` adds it there, with its evidence.
-
-## Commits
-
-- **Conventional Commits, title only.** No scope and no body. *checked: commitlint*
-- **One intention per commit.** The title describes the whole change.
