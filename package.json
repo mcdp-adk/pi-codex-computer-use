@@ -1,6 +1,6 @@
 {
   "name": "@mcdp-adk/pi-codex-computer-use",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "pi extension: run cells in the Codex REPL to drive Windows desktop apps",
   "type": "module",
   "main": "src/extension.mjs",
