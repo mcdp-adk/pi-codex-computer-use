@@ -18,6 +18,8 @@ const HOST_TIMEOUT_MARGIN_MS = 10_000;
 const RUNTIME_DEFAULT_TIMEOUT_MS = 30_000;
 // turn_ended is a courtesy signal; a short timeout keeps run settle snappy.
 const TURN_ENDED_TIMEOUT_MS = 5_000;
+// The client reports the package's own version.
+const { version } = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 // Set when the REPL was reset or relaunched; the next cell result opens
 // with the notice, then the flag clears. Tests assert the exact text the
@@ -216,7 +218,7 @@ export class ComputerUse {
     const transport = new StdioTransport({ command: found.command, args: [], env, inheritEnv: false });
     const client = new McpClient({
       name: 'pi-codex-computer-use',
-      version: '0.1.0',
+      version,
       capabilities: { elicitation: { form: {} } },
     });
     client.setRequestHandler('elicitation/create', async () => {
