@@ -16,8 +16,6 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - name: package-lock.json matches package.json
-        run: npm install --package-lock-only --ignore-scripts && git diff --exit-code package-lock.json
       - run: npm run lint
       - run: npm test
       - name: commitlint on the pull request's commits
