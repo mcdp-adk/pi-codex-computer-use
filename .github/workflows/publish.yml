@@ -5,10 +5,11 @@
 #
 # To release <version>:
 #   1. On a branch, run `npm version <version>`; it bumps package.json and
-#      package-lock.json only (see .npmrc). Open a PR titled
+#      package-lock.json only (see .npmrc). Commit them in a PR titled
 #      `chore: release <version>`.
-#   2. Once it is squash-merged, tag the merged commit and push the tag:
-#      git fetch && git tag v<version> origin/main && git push origin v<version>
+#   2. Once it is squash-merged, tag its merged commit and push the tag:
+#      git fetch && git tag v<version> "$(gh pr view <pr> --json mergeCommit --jq .mergeCommit.oid)"
+#      git push origin v<version>
 name: publish
 
 on:
