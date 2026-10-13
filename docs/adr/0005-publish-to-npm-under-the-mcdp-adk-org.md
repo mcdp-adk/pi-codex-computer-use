@@ -1,6 +1,6 @@
 # Publish to npm under the mcdp-adk organization
 
-The package is published to npm as `@mcdp-adk/pi-codex-computer-use`, under an npm organization named after the GitHub owner, and installing from the git repository stays supported. An npm install needs no clone and no manual dependency install, and a published name can never be reused, so it matches the GitHub repository rather than an npm user. Releases are published by a workflow through npm trusted publishing, so no npm token exists.
+The package is published to npm as `@mcdp-adk/pi-codex-computer-use`, under an npm organization named after the GitHub owner, and installing from the git repository stays supported. An npm install needs no clone and no manual dependency install, and a published name can never be reused, so it matches the GitHub repository rather than an npm user. Releases are published by a workflow through npm trusted publishing, so no npm token exists. npm trusts a workflow only for a package that already exists, so 0.1.0 is published by hand and carries no provenance.
 
 ## Considered Options
 
