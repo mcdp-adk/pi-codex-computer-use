@@ -17,7 +17,7 @@
     "skills"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || exit 0",
