@@ -27,4 +27,4 @@ A test exists to buy confidence that the package works when the user really uses
 ## Model-facing text
 
 - **Supported facts only.** The skill and the tool descriptions state only what the code or `docs/runtime-behavior.md` supports, and the skill lists only differences from the Codex guidance (ADR 0004).
-- **New runtime facts are recorded.** A change that relies on Codex runtime or pi behavior not yet in `docs/runtime-behavior.md` adds it there, with its evidence.
+- **New runtime facts are recorded.** A change whose code relies on Codex runtime or pi behavior not yet in `docs/runtime-behavior.md` adds it there, with its evidence.
