@@ -10,7 +10,7 @@ Read `CONTRIBUTING.md` before writing an issue, a commit, a pull request, or a c
 
 ## Runtime behavior
 
-Before relying on how the Codex runtime or pi behaves, read `docs/runtime-behavior.md`; record what you establish there, with its evidence.
+Before this package's code relies on how the Codex runtime or pi behaves, read `docs/runtime-behavior.md`; record what you establish there, with its evidence.
 
 ## Workspace
 
