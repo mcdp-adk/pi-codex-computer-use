@@ -1,5 +1,5 @@
 {
-  "name": "pi-codex-computer-use",
+  "name": "@mcdp-adk/pi-codex-computer-use",
   "version": "0.1.0",
   "description": "pi extension: run cells in the Codex REPL to drive Windows desktop apps",
   "type": "module",
@@ -40,5 +40,9 @@
     "@earendil-works/pi-mcp": "^1.1.0",
     "smol-toml": "^1.9.1"
   },
-  "private": true
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mcdp-adk/pi-codex-computer-use.git"
+  }
 }

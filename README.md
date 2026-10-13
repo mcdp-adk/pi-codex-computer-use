@@ -14,13 +14,16 @@ This package ships no Codex files. It discovers and runs the Codex runtime alrea
 ## Install
 
 ```sh
-git clone https://github.com/mcdp-adk/pi-codex-computer-use.git
-cd pi-codex-computer-use
-npm install
-pi install ./path/to/pi-codex-computer-use
+pi install npm:@mcdp-adk/pi-codex-computer-use
 ```
 
-`pi install` adds the package to your settings and records the path of the clone, so the clone must stay where it is — moving or deleting it breaks the package. The extension registers the `computer_use` / `computer_use_reset` tools, and the `codex-computer-use` skill becomes available to the model.
+Or install from the git repository, which follows `main` instead of releases:
+
+```sh
+pi install git:github.com/mcdp-adk/pi-codex-computer-use
+```
+
+The extension registers the `computer_use` / `computer_use_reset` tools, and the `codex-computer-use` skill becomes available to the model.
 
 ## Use
 
