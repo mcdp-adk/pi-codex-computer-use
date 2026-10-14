@@ -94,15 +94,38 @@ if (closes.length && pr['draft'] !== true) {
       fail(`closes #${number}, but the issue could not be read: ${execFailureDetail(error)}`);
       continue;
     }
-    if (!isRecord(issue) || issue['state'] !== 'OPEN') continue;
-    const issueBody: string = typeof issue['body'] === 'string' ? issue['body'] : '';
+    if (!isRecord(issue)) {
+      fail(`closes #${number}, but gh returned malformed issue data (not an object)`);
+      continue;
+    }
+    if (issue['state'] !== 'OPEN') continue;
+    const issueBody: unknown = issue['body'];
+    if (typeof issueBody !== 'string') {
+      fail(`closes #${number}, but gh returned malformed issue data (body is not a string)`);
+      continue;
+    }
     const unticked = issueBody.split(/\r?\n/).filter((line) => /^\s*[-*] \[ \]/.test(line)).length;
     if (unticked) fail(`closes #${number}, which has ${unticked} unticked acceptance ${unticked === 1 ? 'criterion' : 'criteria'}`);
     const comments: unknown = issue['comments'];
-    const commentText: string = Array.isArray(comments)
-      ? comments.map((comment) => (isRecord(comment) && typeof comment['body'] === 'string' ? comment['body'] : '')).join('\n')
-      : '';
-    for (const sha of citedCommits(commentText)) {
+    if (!Array.isArray(comments)) {
+      fail(`closes #${number}, but gh returned malformed issue data (comments is not an array)`);
+      continue;
+    }
+    const bodies: string[] = [];
+    let malformedComment = false;
+    for (const comment of comments) {
+      const commentBody: unknown = isRecord(comment) ? comment['body'] : undefined;
+      if (typeof commentBody !== 'string') {
+        malformedComment = true;
+        break;
+      }
+      bodies.push(commentBody);
+    }
+    if (malformedComment) {
+      fail(`closes #${number}, but gh returned malformed issue data (a comment body is not a string)`);
+      continue;
+    }
+    for (const sha of citedCommits(bodies.join('\n'))) {
       if (!isAncestorOfHead(sha)) fail(`closes #${number}, whose comments cite ${sha}, a commit that is on neither this PR nor main`);
     }
   }
