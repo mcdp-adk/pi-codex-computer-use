@@ -22,7 +22,10 @@ const TURN_ENDED_TIMEOUT_MS = 5_000;
 // The client reports the package's own version: its manifest is authored in
 // this repo, so its shape is asserted, not probed.
 const manifest: unknown = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-if (!isRecord(manifest) || typeof manifest['version'] !== 'string') {
+if (!isRecord(manifest) || Array.isArray(manifest)) {
+  throw new Error('package.json is malformed (expected an object)');
+}
+if (typeof manifest['version'] !== 'string') {
   throw new Error('package.json has no string version');
 }
 const version: string = manifest['version'];

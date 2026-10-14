@@ -28,6 +28,17 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+// Narrow a parsed value to the object it must be. A wrong-shaped file or
+// variable is reported as malformed — naming it — never as a downstream
+// missing piece. Arrays pass isRecord above but are never the mapping shape
+// a config or manifest needs.
+function asRecord(value: unknown, what: string): Record<string, unknown> {
+  if (!isRecord(value) || Array.isArray(value)) {
+    throw new Error(`${what} is malformed (expected an object)`);
+  }
+  return value;
+}
+
 // Codex's configuration file: CODEX_HOME env or ~/.codex/config.toml.
 function configPath(): string {
   const home = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
@@ -68,7 +79,13 @@ export function locateInstallation(): InstallationFound | InstallationMissing {
     return { ok: false, missing: [`Codex config file could not be parsed (${message})`] };
   }
   const servers: unknown = doc.mcp_servers;
+  if (servers !== undefined && (!isRecord(servers) || Array.isArray(servers))) {
+    return { ok: false, missing: ['Codex config file is malformed ([mcp_servers] should be a table)'] };
+  }
   const nodeRepl: unknown = isRecord(servers) ? servers['node_repl'] : undefined;
+  if (nodeRepl !== undefined && (!isRecord(nodeRepl) || Array.isArray(nodeRepl))) {
+    return { ok: false, missing: ['Codex config file is malformed ([mcp_servers.node_repl] should be a table)'] };
+  }
   const entry: Record<string, unknown> = isRecord(nodeRepl) ? nodeRepl : {};
   const command: unknown = entry['command'];
   if (!command) return { ok: false, missing: ['[mcp_servers.node_repl] command in Codex config'] };
@@ -77,6 +94,9 @@ export function locateInstallation(): InstallationFound | InstallationMissing {
   }
 
   const envValue: unknown = entry['env'];
+  if (envValue !== undefined && (!isRecord(envValue) || Array.isArray(envValue))) {
+    return { ok: false, missing: ['Codex config file is malformed ([mcp_servers.node_repl] env should be a table)'] };
+  }
   const env: Record<string, string> = isRecord(envValue)
     ? Object.fromEntries(Object.entries(envValue).map(([k, v]) => [k, String(v)]))
     : {};
@@ -132,6 +152,7 @@ function checkSkyModule(env: Record<string, string>): void {
     } catch {
       throw new Error(`Cannot resolve ${SKY_SERVICE}: ${packageName}'s package.json is not valid JSON`);
     }
+    pkg = asRecord(pkg, `Cannot resolve ${SKY_SERVICE}: ${packageName}'s package.json`);
     let entryFile: string;
     try {
       entryFile = manifestEntryPath(pkg);
@@ -151,10 +172,19 @@ function checkSkyModule(env: Record<string, string>): void {
 // (JSON mapping service name -> module specifier, "sky" -> "@oai/sky/service");
 // the package name is the specifier up to the package boundary.
 function skyPackageSpecifier(env: Record<string, string>): string {
-  const services: unknown = JSON.parse(env?.NODE_REPL_TRUSTED_SERVICES ?? '{}') as unknown;
-  const specifier: unknown = isRecord(services) ? services[SKY_SERVICE] : undefined;
-  if (typeof specifier !== 'string' || !specifier) {
+  let services: unknown;
+  try {
+    services = JSON.parse(env?.NODE_REPL_TRUSTED_SERVICES ?? '{}') as unknown;
+  } catch {
+    throw new Error(`Cannot resolve ${SKY_SERVICE}: NODE_REPL_TRUSTED_SERVICES is not valid JSON`);
+  }
+  const table = asRecord(services, `Cannot resolve ${SKY_SERVICE}: NODE_REPL_TRUSTED_SERVICES`);
+  const specifier: unknown = table[SKY_SERVICE];
+  if (specifier === undefined || specifier === '') {
     throw new Error(`Cannot resolve ${SKY_SERVICE}: not listed in NODE_REPL_TRUSTED_SERVICES`);
+  }
+  if (typeof specifier !== 'string') {
+    throw new Error(`Cannot resolve ${SKY_SERVICE}: NODE_REPL_TRUSTED_SERVICES is malformed ("${SKY_SERVICE}" should be a module specifier string)`);
   }
   return specifier.startsWith('@')
     ? specifier.split('/').slice(0, 2).join('/')
