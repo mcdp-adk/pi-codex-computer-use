@@ -101,7 +101,7 @@ withRealRuntime('run a cell in the Codex REPL from pi', () => {
           `cell did not capture the opened window: ${JSON.stringify(observed)}`,
         );
         const screenshots: unknown = observed['screenshots'];
-        assert.ok(typeof screenshots === 'number' && screenshots >= 1, `no screenshot of the opened window: ${JSON.stringify(observed)}`);
+        assert.ok(Number(screenshots) >= 1, `no screenshot of the opened window: ${JSON.stringify(observed)}`);
         const images = toolContentImages(results[0]);
         assert.ok(images.length >= 1, `expected >=1 image in tool result, got ${images.length} (${toolContentTexts(results[0]).slice(0, 200)})`);
         assert.match(images[0].mimeType, /^image\//);

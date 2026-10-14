@@ -306,11 +306,13 @@ interface ProcEntry {
   Name?: string;
 }
 
-function asProcEntry(value: unknown): ProcEntry | null {
-  if (!isRecord(value)) return null;
+function asProcEntry(value: unknown): ProcEntry {
+  if (!isRecord(value)) throw new Error(`malformed process snapshot: ${JSON.stringify(value)}`);
   const pid: unknown = value['ProcessId'];
   const parentPid: unknown = value['ParentProcessId'];
-  if (typeof pid !== 'number' || typeof parentPid !== 'number') return null;
+  if (typeof pid !== 'number' || typeof parentPid !== 'number') {
+    throw new Error(`malformed process snapshot: ${JSON.stringify(value)}`);
+  }
   const name: unknown = value['Name'];
   return {
     ProcessId: pid,
@@ -325,13 +327,11 @@ export function procSnapshot(): ProcEntry[] {
     { encoding: 'utf8' },
   );
   const parsed: unknown = JSON.parse(out);
+  // PowerShell ConvertTo-Json returns a single object rather than an array
+  // for one row, as the original harness handled; anything else shaped
+  // wrong throws below instead of passing on a bad observation.
   const rows: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
-  const entries: ProcEntry[] = [];
-  for (const row of rows) {
-    const entry = asProcEntry(row);
-    if (entry) entries.push(entry);
-  }
-  return entries;
+  return rows.map(asProcEntry);
 }
 
 export function replProcPids(): number[] {
