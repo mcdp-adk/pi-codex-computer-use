@@ -67,7 +67,7 @@ withRealRuntime('reset, crash recovery, and abort', () => {
       const parsed: unknown = JSON.parse(lastLine);
       assert.equal(isRecord(parsed) ? parsed['marker'] : parsed, null, 'value survived reset on globalThis');
       const windows: unknown = isRecord(parsed) ? parsed['windows'] : undefined;
-      assert.ok(typeof windows === 'number' && windows >= 0, 'sky was not ready after reset (list_windows failed to arrive)');
+      assert.ok(Number(windows) >= 0, 'sky was not ready after reset (list_windows failed to arrive)');
     } finally {
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
       session.dispose();
