@@ -9,8 +9,9 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { locateInstallation } from './installation.mjs';
+import { locateInstallation, isRecord } from './installation.ts';
 import { McpClient, StdioTransport } from '@earendil-works/pi-mcp';
+import type { CallToolResult, ContentBlock, TextContent, ImageContent } from '@earendil-works/pi-mcp';
 
 // The host's MCP request timeout rides above the cell's own timeout so the
 // runtime's own timeout always fires first.
@@ -18,8 +19,13 @@ const HOST_TIMEOUT_MARGIN_MS = 10_000;
 const RUNTIME_DEFAULT_TIMEOUT_MS = 30_000;
 // turn_ended is a courtesy signal; a short timeout keeps run settle snappy.
 const TURN_ENDED_TIMEOUT_MS = 5_000;
-// The client reports the package's own version.
-const { version } = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+// The client reports the package's own version: its manifest is authored in
+// this repo, so its shape is asserted, not probed.
+const manifest: unknown = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+if (!isRecord(manifest) || typeof manifest['version'] !== 'string') {
+  throw new Error('package.json has no string version');
+}
+const version: string = manifest['version'];
 
 // Set when the REPL was reset or relaunched; the next cell result opens
 // with the notice, then the flag clears. Tests assert the exact text the
@@ -41,6 +47,17 @@ if (!globalThis.sky) {
   globalThis.sky = sky;
 }
 `;
+
+// The tools/call params of one cell: the cell plus, when the cell asks for
+// its own timeout, `timeout_ms`, plus the run's turn metadata when one is
+// active. An index signature, so the params pass as the MCP client's
+// `Record<string, unknown>`; the named fields keep the shape explicit.
+interface CellParams {
+  [key: string]: unknown;
+  name: string;
+  arguments: Record<string, unknown>;
+  _meta?: Record<string, unknown>;
+}
 
 export class ComputerUse {
   constructor() {
@@ -64,13 +81,13 @@ export class ComputerUse {
 
   // The pi session id names this host session to the runtime. Empty is not
   // a session id; the extension forwards only real ones.
-  setSessionId(sessionId) {
+  setSessionId(sessionId: string): void {
     this.#sessionId = sessionId;
   }
 
   // A new agent run begins (each prompt): every cell in it carries this
   // fresh id.
-  beginRun() {
+  beginRun(): void {
     this.#turnSeq += 1;
     this.#turnId = `${this.#sessionId}-turn-${this.#turnSeq}-${randomBytes(3).toString('hex')}`;
   }
@@ -85,7 +102,7 @@ export class ComputerUse {
   // listeners), so it uses a short timeout and swallows errors — the
   // runtime's own timeout covers the rest. The run id is dropped first, so
   // the active-run gate applies at once even while the goodbye is in flight.
-  async endRun(aborted = false) {
+  async endRun(aborted: boolean = false): Promise<void> {
     const turnId = this.#turnId;
     if (!turnId) return; // no active agent run — nothing to signal
     this.#turnId = null;
@@ -111,21 +128,24 @@ export class ComputerUse {
   // whatever the cell turns out to be — the content of a successful cell,
   // the thrown error's message when it fails — and is settled exactly once
   // either way.
-  async runCell(code, { signal, timeoutMs } = {}) {
+  async runCell(code: string, { signal, timeoutMs }: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<(TextContent | ImageContent)[]> {
     this.#assertAgentRunActive();
     this.#noticeIfRelaunched();
     return this.#settleResetNotice(async () => {
       await this.#ensureSky({ signal });
       const r = await this.#cell(code, { signal, timeoutMs });
       if (r?.isError) throw new Error(textOf(r) || 'REPL cell failed');
-      return r.content ?? [];
+      // The runtime answers a cell with text and image blocks only
+      // (docs/runtime-behavior.md); the MCP type is wider, so the narrowing
+      // is asserted, not filtered — nothing is dropped at run time.
+      return (r.content ?? []) as (TextContent | ImageContent)[];
     });
   }
 
   // Reset: close the REPL and start fresh; the next cell relaunches it,
   // re-initialises sky (#ensureSky), and its result carries a notice that
   // REPL state was reset.
-  async reset() {
+  async reset(): Promise<void> {
     this.#assertAgentRunActive();
     await this.#shutDown();
     this.#skyReady = false;
@@ -135,7 +155,7 @@ export class ComputerUse {
 
   // Kill the REPL process tree when the pi session ends. Returning the
   // promise lets pi's shutdown await the teardown.
-  async close() {
+  async close(): Promise<void> {
     await this.#shutDown();
     this.#skyReady = false;
     this.#resetNotice = false;
@@ -145,7 +165,7 @@ export class ComputerUse {
   // Detect a REPL that exited between calls (crash / killed / window closed)
   // and arrange for the next cell result to carry a reset notice. #launch
   // relaunches it; #ensureSky re-initialises sky.
-  #noticeIfRelaunched() {
+  #noticeIfRelaunched(): void {
     if (!this.#repl && this.#startedBefore) {
       this.#resetNotice = true;
       this.#skyReady = false;
@@ -156,7 +176,7 @@ export class ComputerUse {
   // Ready sky in a new REPL: the launch's fresh installation lookup has
   // already checked the module is present, so this only runs the init cell
   // (the same one Codex's own Initialize runs).
-  async #ensureSky({ signal } = {}) {
+  async #ensureSky({ signal }: { signal?: AbortSignal } = {}): Promise<void> {
     if (this.#skyReady) return;
     const r = await this.#cell(SKY_INIT_CELL, { timeoutMs: 30_000, signal });
     if (r?.isError) throw new Error(`sky init failed: ${textOf(r)}`);
@@ -169,10 +189,10 @@ export class ComputerUse {
   // params._meta (see #cellParams); the runtime surfaces it to the cell as
   // nodeRepl.requestMeta. Per `signal`, pi's AbortSignal cancels the MCP
   // request promptly instead of waiting for the cell to finish.
-  async #cell(code, { signal, timeoutMs } = {}) {
+  async #cell(code: string, { signal, timeoutMs }: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<CallToolResult> {
     const repl = await this.#launch({ signal });
     const cellTimeoutMs = timeoutMs ?? RUNTIME_DEFAULT_TIMEOUT_MS;
-    return repl.request('tools/call', this.#cellParams(code, { timeoutMs }), {
+    return repl.request<CallToolResult>('tools/call', this.#cellParams(code, { timeoutMs }), {
       signal,
       timeoutMs: cellTimeoutMs + HOST_TIMEOUT_MARGIN_MS,
     });
@@ -180,8 +200,8 @@ export class ComputerUse {
 
   // The tools/call params of one cell. `timeout_ms` when the cell asks for
   // its own timeout; the run's turn metadata when one is active.
-  #cellParams(code, { timeoutMs } = {}) {
-    const arguments_ = { code };
+  #cellParams(code: string, { timeoutMs }: { timeoutMs?: number } = {}): CellParams {
+    const arguments_: Record<string, unknown> = { code };
     if (timeoutMs != null) arguments_.timeout_ms = timeoutMs;
     return {
       name: 'js',
@@ -193,7 +213,7 @@ export class ComputerUse {
   // Launch nothing until the first cell. Every launch performs a fresh
   // installation lookup, so Codex's configuration is re-read whenever a
   // REPL is launched — a Codex update mid-session is picked up.
-  async #launch({ signal } = {}) {
+  async #launch({ signal }: { signal?: AbortSignal } = {}): Promise<McpClient> {
     if (this.#repl) return this.#repl;
     const found = locateInstallation();
     if (!found.ok) {
@@ -206,7 +226,7 @@ export class ComputerUse {
     // persisted. inheritEnv: false makes this merged, cleaned object the
     // child's whole environment — StdioTransport would otherwise re-merge
     // process.env and bring the deleted variables back.
-    const env = { ...process.env, ...found.env };
+    const env = { ...process.env, ...found.env } as Record<string, string>;
     for (const k of ['SKY_CUA_NATIVE_PIPE', 'SKY_CUA_NATIVE_PIPE_DIRECTORY', 'CODEX_CLI_PATH']) {
       delete env[k];
     }
@@ -248,7 +268,7 @@ export class ComputerUse {
   // Failing fast when no agent run is active: a cell or a reset outside a
   // prompt has no run id to carry, and every caller of the host module
   // should see the same single check.
-  #assertAgentRunActive() {
+  #assertAgentRunActive(): void {
     if (!this.#turnId) throw new Error('computer-use has no active agent run; start a prompt first');
   }
 
@@ -262,7 +282,7 @@ export class ComputerUse {
   // model's tool result. A transient failure between the REPL dying and the
   // relaunch happens once for one cell: settle first, then rethrow, so the
   // next cell is not told again that the state was reset.
-  async #settleResetNotice(run) {
+  async #settleResetNotice(run: () => Promise<(TextContent | ImageContent)[]>): Promise<(TextContent | ImageContent)[]> {
     try {
       const content = await run();
       if (!this.#resetNotice) return content;
@@ -280,29 +300,29 @@ export class ComputerUse {
   // crash handler can then never see a live one), then close the client —
   // it tears down in-flight requests and closes the transport, which kills
   // the REPL process tree.
-  async #shutDown() {
+  async #shutDown(): Promise<void> {
     const repl = this.#repl;
     this.#repl = null;
     if (!repl) return;
     await repl.close();
   }
 
-  #tmpDir;
-  #sessionId;
-  #turnId;
-  #turnSeq;
-  #repl;
-  #skyReady;
-  #resetNotice;
-  #startedBefore;
+  #tmpDir: string;
+  #sessionId: string;
+  #turnId: string | null;
+  #turnSeq: number;
+  #repl: McpClient | null;
+  #skyReady: boolean;
+  #resetNotice: boolean;
+  #startedBefore: boolean;
 }
 
 // Reject when `signal` aborts; otherwise settle with `promise`. Cleans the
 // listener up on the promise path.
-function raceAbort(promise, signal) {
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return promise;
   return new Promise((resolve, reject) => {
-    const onAbort = () => reject(signal.reason ?? new Error('aborted'));
+    const onAbort = (): void => reject(signal.reason ?? new Error('aborted'));
     if (signal.aborted) return onAbort();
     signal.addEventListener('abort', onAbort, { once: true });
     promise.then(
@@ -314,6 +334,6 @@ function raceAbort(promise, signal) {
 
 // The error message a failed cell result carries: the text blocks' joined
 // text, which is where the runtime puts a failed cell's message.
-function textOf(r) {
-  return (r?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('');
+function textOf(r: CallToolResult | null | undefined): string {
+  return (r?.content ?? []).filter((c: ContentBlock): c is TextContent => c.type === 'text').map((c) => c.text).join('');
 }

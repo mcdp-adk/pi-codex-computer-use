@@ -112,7 +112,7 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
     // installation lookup cannot complete — and computer_use_reset tears
     // the REPL down. The next cell relaunches; only a re-read of the config
     // can fail the launch with the new file's problem, and the failure names
-    // the cause (installation.mjs's fail-fast check). A host that kept the
+    // the cause (installation.ts's fail-fast check). A host that kept the
     // first launch's lookup would relaunch the old, valid configuration and
     // the cell would succeed.
     const home = codexHome('re-read', {

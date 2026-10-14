@@ -3,10 +3,10 @@
   "version": "0.1.1",
   "description": "pi extension: run cells in the Codex REPL to drive Windows desktop apps",
   "type": "module",
-  "main": "src/extension.mjs",
+  "main": "src/extension.ts",
   "pi": {
     "extensions": [
-      "src/extension.mjs"
+      "src/extension.ts"
     ],
     "skills": [
       "skills/codex-computer-use"
@@ -21,7 +21,7 @@
   },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || exit 0",
-    "lint": "eslint . && knip",
+    "lint": "eslint . && tsc -p . && knip",
     "test": "node test/run.mjs"
   },
   "devDependencies": {
@@ -31,10 +31,12 @@
     "@earendil-works/pi-coding-agent": "^1.1.0",
     "eslint": "^10.12.0",
     "globals": "^17.13.0",
-    "knip": "^6.41.0"
+    "knip": "^6.41.0",
+    "typescript": "^7.0.2"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
   },
   "dependencies": {
     "@earendil-works/pi-mcp": "^1.1.0",

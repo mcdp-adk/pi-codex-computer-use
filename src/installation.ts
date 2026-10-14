@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
+import type { TomlTable } from 'smol-toml';
 
 // The sky API reference sits next to the REPL module, under @oai/sky/docs in
 // one of the node_modules directories the REPL resolves packages from.
@@ -20,10 +21,34 @@ const PLUGIN_DOCS = path.join('plugins', 'computer-use', 'docs');
 // The trusted service the cells import sky through (NODE_REPL_TRUSTED_SERVICES).
 const SKY_SERVICE = 'sky';
 
+// Parsed TOML and JSON arrive as unknown and are narrowed before use, so a
+// renamed key is a type error rather than a silent `undefined`. The check
+// mirrors the old `typeof x === 'object'` guards, arrays included.
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 // Codex's configuration file: CODEX_HOME env or ~/.codex/config.toml.
-function configPath() {
+function configPath(): string {
   const home = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
   return path.join(home, 'config.toml');
+}
+
+// A complete installation: the REPL's launch command, Codex's configured
+// environment for it, and the three located documents.
+export interface InstallationFound {
+  ok: true;
+  command: string;
+  env: Record<string, string>;
+  guidancePath: string;
+  confirmationPolicyPath: string;
+  skyReferencePath: string;
+}
+
+// An incomplete installation: exactly what is missing, each piece named.
+export interface InstallationMissing {
+  ok: false;
+  missing: string[];
 }
 
 // Locate the Codex installation. Returns
@@ -32,33 +57,39 @@ function configPath() {
 // and a missing REPL command are reported alone; the module, document, and
 // plugin checks only run once a launchable command exists, so their failures
 // join one list.
-export function locateInstallation() {
+export function locateInstallation(): InstallationFound | InstallationMissing {
   const file = configPath();
   if (!fs.existsSync(file)) return { ok: false, missing: ['Codex config file (config.toml)'] };
-  let doc;
+  let doc: TomlTable;
   try {
     doc = parseToml(fs.readFileSync(file, 'utf8'));
   } catch (err) {
-    return { ok: false, missing: [`Codex config file could not be parsed (${err.message})`] };
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, missing: [`Codex config file could not be parsed (${message})`] };
   }
-  const entry = doc.mcp_servers?.node_repl ?? {};
-  if (!entry.command) return { ok: false, missing: ['[mcp_servers.node_repl] command in Codex config'] };
-  if (!fs.existsSync(entry.command)) {
-    return { ok: false, missing: [`node_repl command (${entry.command} not found)`] };
+  const servers: unknown = doc.mcp_servers;
+  const nodeRepl: unknown = isRecord(servers) ? servers['node_repl'] : undefined;
+  const entry: Record<string, unknown> = isRecord(nodeRepl) ? nodeRepl : {};
+  const command: unknown = entry['command'];
+  if (!command) return { ok: false, missing: ['[mcp_servers.node_repl] command in Codex config'] };
+  if (typeof command !== 'string' || !fs.existsSync(command)) {
+    return { ok: false, missing: [`node_repl command (${String(command)} not found)`] };
   }
 
-  const env = entry.env && typeof entry.env === 'object'
-    ? Object.fromEntries(Object.entries(entry.env).map(([k, v]) => [k, String(v)]))
+  const envValue: unknown = entry['env'];
+  const env: Record<string, string> = isRecord(envValue)
+    ? Object.fromEntries(Object.entries(envValue).map(([k, v]) => [k, String(v)]))
     : {};
 
-  const missing = [];
+  const missing: string[] = [];
   // The sky module: the check the sky init cell depends on, run at lookup
   // time — before any tool exists to run it — so a missing service entry or
   // package is named instead of failing deep inside a cell.
   try {
     checkSkyModule(env);
   } catch (err) {
-    missing.push(`sky module (${err.message})`);
+    const message = err instanceof Error ? err.message : String(err);
+    missing.push(`sky module (${message})`);
   }
   const skyReferencePath = skyModuleRoots(env)
     .map((root) => path.join(root, SKY_DOC))
@@ -70,9 +101,13 @@ export function locateInstallation() {
   if (!confirmationPolicyPath) missing.push('confirmation policy (bundled computer-use plugin docs/confirmations.md)');
 
   if (missing.length) return { ok: false, missing };
+  // Every null path pushes its message above, so past this point all three
+  // are strings. The check below is that invariant in a form the compiler
+  // follows; it fires only with an empty missing list, which cannot happen.
+  if (!skyReferencePath || !guidancePath || !confirmationPolicyPath) return { ok: false, missing };
   return {
     ok: true,
-    command: entry.command,
+    command,
     env,
     guidancePath,
     confirmationPolicyPath,
@@ -85,23 +120,24 @@ export function locateInstallation() {
 // `main` or `exports` names is on disk — a manifest-only shell (a half-copied
 // install) is incomplete. The ONE place this is checked. Throws naming what
 // is missing.
-function checkSkyModule(env) {
+function checkSkyModule(env: Record<string, string>): void {
   const packageName = skyPackageSpecifier(env);
   for (const root of skyModuleRoots(env)) {
     const dir = path.join(root, packageName);
     const manifestPath = path.join(dir, 'package.json');
     if (!fs.existsSync(manifestPath)) continue;
-    let pkg;
+    let pkg: unknown;
     try {
-      pkg = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      pkg = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown;
     } catch {
       throw new Error(`Cannot resolve ${SKY_SERVICE}: ${packageName}'s package.json is not valid JSON`);
     }
-    let entryFile;
+    let entryFile: string;
     try {
       entryFile = manifestEntryPath(pkg);
     } catch (err) {
-      throw new Error(`Cannot resolve ${SKY_SERVICE}: ${packageName}'s package.json names no usable entry (${err.message})`);
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`Cannot resolve ${SKY_SERVICE}: ${packageName}'s package.json names no usable entry (${message})`);
     }
     if (!fs.existsSync(path.join(dir, entryFile))) {
       throw new Error(`Cannot resolve ${SKY_SERVICE}: ${packageName}'s entry file ${entryFile} is missing`);
@@ -114,10 +150,10 @@ function checkSkyModule(env) {
 // The specifier cells import (e.g. "@oai/sky"), from NODE_REPL_TRUSTED_SERVICES
 // (JSON mapping service name -> module specifier, "sky" -> "@oai/sky/service");
 // the package name is the specifier up to the package boundary.
-function skyPackageSpecifier(env) {
-  const services = JSON.parse(env?.NODE_REPL_TRUSTED_SERVICES ?? '{}');
-  const specifier = services[SKY_SERVICE];
-  if (!specifier) {
+function skyPackageSpecifier(env: Record<string, string>): string {
+  const services: unknown = JSON.parse(env?.NODE_REPL_TRUSTED_SERVICES ?? '{}') as unknown;
+  const specifier: unknown = isRecord(services) ? services[SKY_SERVICE] : undefined;
+  if (typeof specifier !== 'string' || !specifier) {
     throw new Error(`Cannot resolve ${SKY_SERVICE}: not listed in NODE_REPL_TRUSTED_SERVICES`);
   }
   return specifier.startsWith('@')
@@ -128,7 +164,7 @@ function skyPackageSpecifier(env) {
 // All node_modules roots the REPL can resolve packages from, from the config
 // env's NODE_REPL_NODE_MODULE_DIRS (a node_modules dir or a delimiter-
 // separated list of them; a parent of one is accepted).
-function skyModuleRoots(env) {
+function skyModuleRoots(env: Record<string, string>): string[] {
   return (env?.NODE_REPL_NODE_MODULE_DIRS ?? '')
     .split(path.delimiter)
     .filter(Boolean)
@@ -139,14 +175,16 @@ function skyModuleRoots(env) {
 // then the `.` export's value (a string, or the `default` of a conditional
 // map) — or, when there is no `.` key, the bare `exports` string itself.
 // The export's leading `./` matches the manifest's own paths.
-function manifestEntryPath(pkg) {
-  if (typeof pkg.main === 'string') return pkg.main;
-  const exp = pkg.exports?.['.'] ?? pkg.exports;
+function manifestEntryPath(pkg: unknown): string {
+  const record: Record<string, unknown> | null = isRecord(pkg) ? pkg : null;
+  const main: unknown = record?.['main'];
+  if (typeof main === 'string') return main;
+  const exportsValue: unknown = record?.['exports'];
+  const dot: unknown = isRecord(exportsValue) ? exportsValue['.'] : undefined;
+  const exp: unknown = dot ?? exportsValue;
   if (typeof exp === 'string') return exp;
-  const dot = pkg.exports?.['.'];
-  if (typeof dot === 'string') return dot;
-  if (dot && typeof dot === 'object') {
-    const dflt = dot.default ?? Object.values(dot).find((v) => typeof v === 'string');
+  if (isRecord(dot)) {
+    const dflt: unknown = dot['default'] ?? Object.values(dot).find((v) => typeof v === 'string');
     if (typeof dflt === 'string') return dflt;
   }
   throw new Error('no main and no "." export');
@@ -154,7 +192,7 @@ function manifestEntryPath(pkg) {
 
 // A plugin document (guidance.md, confirmations.md) under the bundled
 // computer-use plugin of the marketplaces recorded in the parsed config.
-function pluginDocPath(name, doc) {
+function pluginDocPath(name: string, doc: TomlTable): string | null {
   for (const root of marketplaceRoots(doc)) {
     const p = path.join(root, PLUGIN_DOCS, name);
     if (fs.existsSync(p)) return p;
@@ -166,19 +204,23 @@ function pluginDocPath(name, doc) {
 // (e.g. the bundled marketplace the computer-use plugin ships in).
 // `[marketplaces.<name>] source = ...` (the real config's shape) and a bare
 // `[marketplace] source = ...` are both accepted.
-function marketplaceRoots(doc) {
-  const tables = [doc?.marketplaces, doc?.marketplace].filter(
-    (t) => t && typeof t === 'object',
+function marketplaceRoots(doc: TomlTable): string[] {
+  const candidates: unknown[] = [doc?.marketplaces, doc?.marketplace];
+  const tables: Record<string, unknown>[] = candidates.filter(
+    (t: unknown): t is Record<string, unknown> => isRecord(t),
   );
   return tables
-    .flatMap((t) => (t.source !== undefined ? [t] : Object.values(t)))
-    .map((e) => (typeof e?.source === 'string' ? stripExtendedPrefix(e.source) : null))
-    .filter(Boolean);
+    .flatMap((t) => (t['source'] !== undefined ? [t] : Object.values(t)))
+    .map((e: unknown) => {
+      const source: unknown = isRecord(e) ? e['source'] : undefined;
+      return typeof source === 'string' ? stripExtendedPrefix(source) : null;
+    })
+    .filter((s: string | null): s is string => Boolean(s));
 }
 
 // Windows writes the extended-length prefix \\?\ in front of long paths
 // recorded in the config; strip it so the path opens normally.
 const EXTENDED_PREFIX = String.fromCharCode(92, 92, 63, 92); // \\?\
-function stripExtendedPrefix(p) {
+function stripExtendedPrefix(p: string): string {
   return p.startsWith(EXTENDED_PREFIX) ? p.slice(EXTENDED_PREFIX.length) : p;
 }

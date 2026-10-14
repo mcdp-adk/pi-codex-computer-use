@@ -260,7 +260,8 @@ withRealRuntime('run a cell in the Codex REPL from pi', () => {
 
   it('criterion 7: REPL hosting logic imports no pi packages', async () => {
     const hostDir = path.resolve(import.meta.dirname, '..', 'src');
-    const files = fs.readdirSync(hostDir).filter((f) => f.endsWith('.mjs') && f !== 'extension.mjs');
+    const files = fs.readdirSync(hostDir).filter((f) => f.endsWith('.ts') && f !== 'extension.ts');
+    assert.ok(files.length > 0, `expected host files in ${hostDir}, found none — the pi-agnostic check must never run empty`);
     const needle = '@earendil-works/pi-coding-agent';
     const offenders = [];
     for (const f of files) {

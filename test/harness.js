@@ -91,7 +91,7 @@ function pushScripted(stream, next) {
 // Creates a pi session whose provider scripts the given responses in order.
 // `scripts` entries are consumed by the faux streamSimple per prompt turn.
 // The extension is loaded the way pi loads packages (package discovery on
-// the package.json pi manifest) — never by importing src/extension.mjs
+// the package.json pi manifest) — never by importing src/extension.ts
 // directly, so the seam is exactly pi's.
 export async function createScriptedSession({ scripts, cwd }) {
   return createScriptedSessionFromPackage({ scripts, cwd });

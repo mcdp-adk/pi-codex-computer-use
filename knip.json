@@ -4,7 +4,7 @@
     "test/*.test.js"
   ],
   "project": [
-    "src/**/*.mjs",
+    "src/**/*.ts",
     "test/**/*.{js,mjs}"
   ],
   "includeEntryExports": true,
