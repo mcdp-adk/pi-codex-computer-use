@@ -146,9 +146,9 @@ export class ComputerUse {
       await this.#ensureSky({ signal });
       const r = await this.#cell(code, { signal, timeoutMs });
       if (r?.isError) throw new Error(textOf(r) || 'REPL cell failed');
-      // The runtime answers a cell with text and image blocks only
-      // (docs/runtime-behavior.md); the MCP type is wider, so the narrowing
-      // is asserted, not filtered — nothing is dropped at run time.
+      // Pass-through: the runtime's content blocks reach pi unchecked, as
+      // before the migration. The cast satisfies the compiler only; nothing
+      // is filtered or dropped at run time.
       return (r.content ?? []) as (TextContent | ImageContent)[];
     });
   }
