@@ -9,8 +9,8 @@ How code in this repo is written, for whoever writes or reviews it. Collaboratio
 - **Every part has a production caller.** Parameters, options, exports, globals, and return values exist because production uses them; nothing is added only so a test can reach inside. *checked for exports and files: `npm run lint`*
 - **TypeScript without a build.** `src/` is TypeScript, checked by the compiler in `npm run lint`; pi loads the `.ts` source directly, so nothing is compiled or emitted. *checked: `npm run lint`*
 - **Erasable syntax only.** No enums, namespaces, or parameter properties — only syntax Node and pi's loader can strip unchanged. *checked: `npm run lint`*
-- **Relative imports name the `.ts` file.** `./computer-use.ts`, never the extensionless path.
-- **No `any` without a comment saying why.** Parsed JSON and TOML arrive as `unknown` and are narrowed before use; caught errors are `unknown`.
+- **Relative imports name the file that exists.** Node and pi run the source as written, so an import names the `.ts` file: `./computer-use.ts`. *checked for extensionless paths: `npm run lint`*
+- **Types describe the real shape.** Parsed JSON and TOML and caught errors start as `unknown` and are narrowed before use; an `any` turns checking off, so it carries a comment saying why.
 - **Fail fast with the real cause.** An error helps only if it names what actually went wrong. A runtime error reaches the model carrying the runtime's own message, with the host's context added, never a paraphrase; a malformed file or value is reported as malformed, never as a different cause.
 
 ## Comments
