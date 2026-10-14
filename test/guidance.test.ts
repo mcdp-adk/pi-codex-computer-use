@@ -15,16 +15,18 @@ import {
   withRealRuntime,
   toolResults,
   toolContentTexts,
-} from './harness.js';
+} from './harness.ts';
+import type { AgentSession } from '@earendil-works/pi-coding-agent';
 
 // The description is built at factory time from what discovery found: without
 // a real installation there are no tool registrations and no discovered
 // documents to assert on.
-let session, toolsSnapshot;
+let session: AgentSession;
+let toolsSnapshot: Array<{ name: string; description: string }>;
 
 withRealRuntime('guide the model with the skill and Codex guidance', () => {
   // One directory for the whole suite, removed with every other test
-  // directory when the test process exits (test/harness.js).
+  // directory when the test process exits (test/harness.ts).
   const root = makeTempRoot('pi-cua-t4');
   const sessionPromise = createScriptedSession({
     cwd: root,
@@ -56,7 +58,9 @@ withRealRuntime('guide the model with the skill and Codex guidance', () => {
   });
 
   it('the computer_use description names the skill and the three located documents', () => {
-    const d = toolsSnapshot.find((t) => t.name === 'computer_use').description;
+    const computerUse = toolsSnapshot.find((t) => t.name === 'computer_use');
+    assert.ok(computerUse, 'computer_use is registered');
+    const d = computerUse.description;
     assert.match(d, /codex-computer-use/, 'description must tell the model to load the skill');
     assert.match(d, /computer_use_guidance_path/, 'description must name the guidance document');
     assert.match(d, /computer_use_confirmations_path/, 'description must name the confirmation policy');
@@ -72,7 +76,9 @@ withRealRuntime('guide the model with the skill and Codex guidance', () => {
   });
 
   it('the named guidance paths exist on the real installation', () => {
-    const d = toolsSnapshot.find((t) => t.name === 'computer_use').description;
+    const computerUse = toolsSnapshot.find((t) => t.name === 'computer_use');
+    assert.ok(computerUse, 'computer_use is registered');
+    const d = computerUse.description;
     const paths = d.match(/[A-Za-z]:\\[^`\s]+/g) ?? [];
     assert.ok(paths.length >= 3, `description names no discoverable paths: ${d.slice(-400)}`);
     for (const p of paths) {

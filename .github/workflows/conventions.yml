@@ -25,6 +25,6 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - run: node scripts/check-pr.mjs ${{ github.event_path }}
+      - run: node scripts/check-pr.ts ${{ github.event_path }}
         env:
           GITHUB_TOKEN: ${{ github.token }}

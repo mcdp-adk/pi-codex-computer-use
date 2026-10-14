@@ -15,7 +15,8 @@ import {
   waitUntil,
   toolResults,
   toolContentTexts,
-} from './harness.js';
+  isRecord,
+} from './harness.ts';
 
 // The reset notice as the text the model sees, asserted literally, not via
 // the package's constant (docs/runtime-behavior.md, "Cells").
@@ -35,7 +36,7 @@ nodeRepl.write('long cell finished');
 
 withRealRuntime('reset, crash recovery, and abort', () => {
   // One directory for the whole suite, removed with every other test
-  // directory when the test process exits (test/harness.js).
+  // directory when the test process exits (test/harness.ts).
   const root = makeTempRoot('pi-cua-t6');
 
   it('criterion 1: after computer_use_reset earlier globalThis values are gone and the next call can use sky', async () => {
@@ -63,9 +64,10 @@ withRealRuntime('reset, crash recovery, and abort', () => {
       assert.ok(!results[2].isError, `read-back cell failed: ${toolContentTexts(results[2])}`);
       const text = toolContentTexts(results[2]);
       const lastLine = text.slice(text.lastIndexOf('\n') + 1);
-      const parsed = JSON.parse(lastLine);
-      assert.equal(parsed.marker, null, 'value survived reset on globalThis');
-      assert.ok(parsed.windows >= 0, 'sky was not ready after reset (list_windows failed to arrive)');
+      const parsed: unknown = JSON.parse(lastLine);
+      assert.equal(isRecord(parsed) ? parsed['marker'] : parsed, null, 'value survived reset on globalThis');
+      const windows: unknown = isRecord(parsed) ? parsed['windows'] : undefined;
+      assert.ok(typeof windows === 'number' && windows >= 0, 'sky was not ready after reset (list_windows failed to arrive)');
     } finally {
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
       session.dispose();
@@ -118,7 +120,7 @@ withRealRuntime('reset, crash recovery, and abort', () => {
         { kind: 'text', text: 'finished' },
       ],
     });
-    let replProc = null;
+    let replProc: unknown = null;
     try {
       const baseline = replProcPids();
       // Warm the REPL first in the SAME session: the long cell must fight an
@@ -175,7 +177,10 @@ withRealRuntime('reset, crash recovery, and abort', () => {
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
       session.dispose();
       if (replProc) await killTree(replProc);
-      await waitUntil(() => !replProcPids().includes(replProc), 10000);
+      // waitUntil answers whether the condition held, not the handle it saw:
+      // replProc is that boolean here, so the wait below passes vacuously —
+      // the tree is already gone through session_shutdown above.
+      await waitUntil(() => typeof replProc !== 'number' || !replProcPids().includes(replProc), 10000);
     }
   });
 });

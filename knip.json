@@ -1,11 +1,12 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
-    "test/*.test.js"
+    "test/*.test.ts"
   ],
   "project": [
     "src/**/*.ts",
-    "test/**/*.{js,mjs}"
+    "test/**/*.ts",
+    "scripts/**/*.ts"
   ],
   "includeEntryExports": true,
   "ignoreBinaries": [

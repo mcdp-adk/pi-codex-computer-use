@@ -7,11 +7,11 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { makeTempRoot, withRealRuntime, createScriptedSession, toolResults, toolContentTexts } from './harness.js';
+import { makeTempRoot, withRealRuntime, createScriptedSession, toolResults, toolContentTexts, isRecord } from './harness.ts';
 
 withRealRuntime('turn metadata on every computer-use cell (observed by the cell)', () => {
   // One directory for the whole suite, removed with every other test
-  // directory when the test process exits (test/harness.js).
+  // directory when the test process exits (test/harness.ts).
   const root = makeTempRoot('pi-cua-t5');
 
   // The cell writes what the runtime handed it as request meta. If no meta
@@ -34,14 +34,13 @@ withRealRuntime('turn metadata on every computer-use cell (observed by the cell)
       const text = toolContentTexts(results[0]);
       assert.ok(!results[0]?.isError, `cell failed: ${text}`);
       assert.notEqual(text, 'NO_REQUEST_META', 'the runtime handed the cell no request metadata');
-      const meta = JSON.parse(text);
-      assert.ok(
-        meta['x-codex-turn-metadata'],
-        `turn metadata key missing in ${text}`,
-      );
-      const { session_id, turn_id } = meta['x-codex-turn-metadata'];
-      assert.equal(session_id, session.sessionManager.getSessionId(), 'session_id is pi session id');
-      assert.ok(turn_id, 'turn_id present');
+      const meta: unknown = JSON.parse(text);
+      assert.ok(isRecord(meta) && meta['x-codex-turn-metadata'], `turn metadata key missing in ${text}`);
+      const turnMeta: unknown = meta['x-codex-turn-metadata'];
+      const sessionId: unknown = isRecord(turnMeta) ? turnMeta['session_id'] : undefined;
+      const turnId: unknown = isRecord(turnMeta) ? turnMeta['turn_id'] : undefined;
+      assert.equal(sessionId, session.sessionManager.getSessionId(), 'session_id is pi session id');
+      assert.ok(turnId, 'turn_id present');
     } finally {
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
       session.dispose();
@@ -62,12 +61,18 @@ withRealRuntime('turn metadata on every computer-use cell (observed by the cell)
       await session.prompt('first run');
       await session.prompt('second run');
       const results = toolResults(session);
-      const first = JSON.parse(toolContentTexts(results[0]))['x-codex-turn-metadata'];
-      const second = JSON.parse(toolContentTexts(results[1]))['x-codex-turn-metadata'];
+      const firstBody: unknown = JSON.parse(toolContentTexts(results[0]));
+      const secondBody: unknown = JSON.parse(toolContentTexts(results[1]));
+      const first: unknown = isRecord(firstBody) ? firstBody['x-codex-turn-metadata'] : undefined;
+      const second: unknown = isRecord(secondBody) ? secondBody['x-codex-turn-metadata'] : undefined;
       const piSessionId = session.sessionManager.getSessionId();
-      assert.equal(first.session_id, piSessionId);
-      assert.equal(second.session_id, piSessionId);
-      assert.notEqual(second.turn_id, first.turn_id, 'turn_id must change between agent runs');
+      const firstSessionId: unknown = isRecord(first) ? first['session_id'] : undefined;
+      const secondSessionId: unknown = isRecord(second) ? second['session_id'] : undefined;
+      assert.equal(firstSessionId, piSessionId);
+      assert.equal(secondSessionId, piSessionId);
+      const firstTurnId: unknown = isRecord(first) ? first['turn_id'] : undefined;
+      const secondTurnId: unknown = isRecord(second) ? second['turn_id'] : undefined;
+      assert.notEqual(secondTurnId, firstTurnId, 'turn_id must change between agent runs');
     } finally {
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
       session.dispose();

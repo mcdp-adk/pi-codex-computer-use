@@ -19,10 +19,11 @@ import {
   killTree,
   replProcPids,
   waitUntil,
-} from './harness.js';
+  isRecord,
+} from './harness.ts';
 
 const RESET_NOTICE_TEXT = 'Codex REPL state was reset: a new REPL was started.';
-const countNotice = (text) => text.split(RESET_NOTICE_TEXT).length - 1;
+const countNotice = (text: string): number => text.split(RESET_NOTICE_TEXT).length - 1;
 
 // Fresh-REPL read-back: whether a pre-reset globalThis value survived (it
 // must not) and whether sky is initialised again (it must be). The last
@@ -32,7 +33,7 @@ const FRESH_CHECK_CELL =
 
 withRealRuntime('the reset notice appears exactly once per new REPL', () => {
   // One directory for the whole suite, removed with every other test
-  // directory when the test process exits (test/harness.js).
+  // directory when the test process exits (test/harness.ts).
   const root = makeTempRoot('pi-cua-t7');
 
   it('criterion 1: after computer_use_reset a failing first cell leads with the notice and the next successful cell does not', async () => {
@@ -67,9 +68,9 @@ withRealRuntime('the reset notice appears exactly once per new REPL', () => {
       assert.ok(!fresh.isError, `fresh-read cell failed: ${toolContentTexts(fresh)}`);
       const freshText = toolContentTexts(fresh);
       const lastLine = freshText.slice(freshText.lastIndexOf('\n') + 1);
-      const parsed = JSON.parse(lastLine);
-      assert.equal(parsed.carried, null, 'value survived reset on globalThis');
-      assert.equal(parsed.sky, 'object', 'sky was not initialised in the new REPL');
+      const parsed: unknown = JSON.parse(lastLine);
+      assert.equal(isRecord(parsed) ? parsed['carried'] : parsed, null, 'value survived reset on globalThis');
+      assert.equal(isRecord(parsed) ? parsed['sky'] : undefined, 'object', 'sky was not initialised in the new REPL');
       assert.ok(countNotice(freshText) === 0, `second cell still carries the notice: ${freshText.slice(0, 160)}`);
     } finally {
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
@@ -114,9 +115,9 @@ withRealRuntime('the reset notice appears exactly once per new REPL', () => {
       assert.ok(!fresh.isError, `fresh-read cell failed: ${toolContentTexts(fresh)}`);
       const freshText = toolContentTexts(fresh);
       const lastLine = freshText.slice(freshText.lastIndexOf('\n') + 1);
-      const parsed = JSON.parse(lastLine);
-      assert.equal(parsed.carried, null, 'value survived the killed REPL on globalThis');
-      assert.equal(parsed.sky, 'object', 'sky was not initialised in the relaunched REPL');
+      const parsed: unknown = JSON.parse(lastLine);
+      assert.equal(isRecord(parsed) ? parsed['carried'] : parsed, null, 'value survived the killed REPL on globalThis');
+      assert.equal(isRecord(parsed) ? parsed['sky'] : undefined, 'object', 'sky was not initialised in the relaunched REPL');
       assert.ok(countNotice(freshText) === 0, `second cell still carries the notice: ${freshText.slice(0, 160)}`);
     } finally {
       await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });

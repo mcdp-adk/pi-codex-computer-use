@@ -6,7 +6,7 @@
     "moduleResolution": "nodenext",
     "strict": true,
     "noEmit": true,
-    // Only the extension source is checked; pi's shipped .d.ts files are
+    // Every source file is checked; pi's shipped .d.ts files are
     // not ours to fix (e.g. their JSON imports need attributes nodenext
     // demands of them, not of us).
     "skipLibCheck": true,
@@ -15,5 +15,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src"]
+  "include": ["src", "test", "scripts"]
 }

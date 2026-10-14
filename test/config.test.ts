@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
-import { realCodexInstallation, withRealRuntime, makeTempRoot, createScriptedSession, toolResults, toolContentTexts, lastJsonObject } from './harness.js';
+import { realCodexInstallation, withRealRuntime, makeTempRoot, createScriptedSession, toolResults, toolContentTexts, lastJsonObject, isRecord } from './harness.ts';
 
 // A fake Codex home whose config.toml the test spells out itself. The
 // [mcp_servers.node_repl] table names the real runtime's `command` so the
@@ -21,13 +21,14 @@ import { realCodexInstallation, withRealRuntime, makeTempRoot, createScriptedSes
 // parsing; `env` carries the env block lines the test spells out itself —
 // the [mcp_servers.node_repl.env] shape Codex itself writes; `topTables`
 // carries the decoy top-level tables the launch must ignore.
-function codexHome(label, { env = '', topTables = '' } = {}) {
+function codexHome(label: string, { env = '', topTables = '' }: { env?: string; topTables?: string } = {}): string {
   const home = makeTempRoot(`codex-home-${label}`);
   const real = realCodexInstallation();
-  const quoted = (v) => String(v ?? '').replace(/\\/g, '\\\\');
-  const envBlock = `NODE_REPL_NODE_MODULE_DIRS = '${quoted(real.env.NODE_REPL_NODE_MODULE_DIRS)}'
-NODE_REPL_TRUSTED_CODE_PATHS = '${quoted(real.env.NODE_REPL_TRUSTED_CODE_PATHS)}'
-NODE_REPL_NODE_PATH = '${quoted(real.env.NODE_REPL_NODE_PATH)}'
+  if ('missing' in real) throw new Error(`needs a real Codex runtime: ${real.missing}`);
+  const quoted = (v: string | undefined): string => String(v ?? '').replace(/\\/g, '\\\\');
+  const envBlock = `NODE_REPL_NODE_MODULE_DIRS = '${quoted(real.env['NODE_REPL_NODE_MODULE_DIRS'])}'
+NODE_REPL_TRUSTED_CODE_PATHS = '${quoted(real.env['NODE_REPL_TRUSTED_CODE_PATHS'])}'
+NODE_REPL_NODE_PATH = '${quoted(real.env['NODE_REPL_NODE_PATH'])}'
 ${env}`;
   // The bundled marketplace table, the shape Codex itself writes, pointing at
   // the real one: guidance and confirmation policy resolve from it. The REPL
@@ -51,14 +52,16 @@ ${envBlock}`;
 // The bundled marketplace root, read from the real config without the
 // package's code: the marketplace table's source points at the root holding
 // plugins/computer-use/docs/guidance.md. null when none — callers decide.
-function realCodexInstallationMarketplace() {
+function realCodexInstallationMarketplace(): string | null {
   const file = path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'config.toml');
   if (!fs.existsSync(file)) return null;
-  const doc = parseToml(fs.readFileSync(file, 'utf8'));
-  const tables = [doc?.marketplaces, doc?.marketplace].filter((t) => t && typeof t === 'object');
+  const doc: unknown = parseToml(fs.readFileSync(file, 'utf8'));
+  if (!isRecord(doc)) return null;
+  const tables = [doc['marketplaces'], doc['marketplace']].filter(isRecord);
   for (const t of tables) {
-    for (const e of (t.source !== undefined ? [t] : Object.values(t))) {
-      const s = typeof e?.source === 'string' ? e.source.replace(/^\\\\\?\\/, '') : null;
+    for (const e of (t['source'] !== undefined ? [t] : Object.values(t))) {
+      const source: unknown = isRecord(e) ? e['source'] : undefined;
+      const s = typeof source === 'string' ? source.replace(/^\\\\\?\\/, '') : null;
       if (s && fs.existsSync(path.join(s, 'plugins', 'computer-use', 'docs', 'guidance.md'))) return s;
     }
   }
@@ -72,7 +75,7 @@ const CONFIG_PROBE_CELL =
 
 withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch', () => {
   // One directory for the whole suite, removed with every other test
-  // directory when the test process exits (test/harness.js).
+  // directory when the test process exits (test/harness.ts).
   const root = makeTempRoot('pi-cua-config');
 
   it('the node_repl entry is applied: the session launches it and sky is configured from its env block', async () => {
@@ -94,7 +97,7 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
         const [result] = toolResults(session);
         assert.ok(!result?.isError, `cell failed: ${toolContentTexts(result)}`);
         const observed = lastJsonObject(toolContentTexts(result));
-        assert.equal(observed.trusted, 'object', 'sky was not configured from the node_repl env block');
+        assert.equal(observed['trusted'], 'object', 'sky was not configured from the node_repl env block');
         assert.match(toolContentTexts(result), /probe-ran/, 'the config-probe cell did not run');
       } finally {
         await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
@@ -140,7 +143,7 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
           `the first cell must carry no reset notice: ${firstText}`,
         );
         const firstObserved = lastJsonObject(firstText);
-        assert.equal(firstObserved.trusted, 'object', 'sky missing on the first launch');
+        assert.equal(firstObserved['trusted'], 'object', 'sky missing on the first launch');
 
         // The change: same home, same file, module directory now bogus.
         const configToml = path.join(home, 'config.toml');
@@ -172,7 +175,7 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
         assert.match(secondText, /^computer_use failed: Codex REPL state was reset/, `failure carries no reset notice: ${secondText}`);
         assert.match(
           secondText,
-          /@oai\/sky/, 
+          /@oai\/sky/,
           `the failure must name the sky module the new config broke: ${secondText}`,
         );
       } finally {
@@ -258,7 +261,7 @@ withRealRuntime('the Codex configuration is read from CODEX_HOME at each launch'
         const [result] = toolResults(session);
         assert.ok(!result?.isError, `cell failed: ${toolContentTexts(result)}`);
         const observed = lastJsonObject(toolContentTexts(result));
-        assert.equal(observed.trusted, 'object', 'sky was not configured from the escaped double-quoted value');
+        assert.equal(observed['trusted'], 'object', 'sky was not configured from the escaped double-quoted value');
         assert.match(toolContentTexts(result), /probe-ran/, 'the config-probe cell did not run');
       } finally {
         await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
@@ -294,7 +297,7 @@ command = 'C:\\bogus\\other-trap.exe'
         const [result] = toolResults(session);
         assert.ok(!result?.isError, `cell failed despite decoy tables: ${toolContentTexts(result)}`);
         const observed = lastJsonObject(toolContentTexts(result));
-        assert.equal(observed.trusted, 'object', 'sky missing — launch did not follow [mcp_servers.node_repl]');
+        assert.equal(observed['trusted'], 'object', 'sky missing — launch did not follow [mcp_servers.node_repl]');
       } finally {
         await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
         session.dispose();
@@ -307,7 +310,7 @@ command = 'C:\\bogus\\other-trap.exe'
 
 // Point CODEX_HOME at `home` until the returned function restores the
 // previous value (or unset). One save/restore per test.
-function setCodexHome(home) {
+function setCodexHome(home: string): () => void {
   const prev = process.env.CODEX_HOME;
   process.env.CODEX_HOME = home;
   return () => {
