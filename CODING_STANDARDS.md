@@ -11,7 +11,7 @@ How code in this repo is written, for whoever writes or reviews it. Collaboratio
 - **Erasable syntax only.** No enums, namespaces, or parameter properties — only syntax Node and pi's loader can strip unchanged. *checked: `npm run lint`*
 - **Relative imports name the `.ts` file.** `./computer-use.ts`, never the extensionless path.
 - **No `any` without a comment saying why.** Parsed JSON and TOML arrive as `unknown` and are narrowed before use; caught errors are `unknown`.
-- **Fail fast with the real cause.** A runtime error reaches the model as a tool error carrying the runtime's own message; the host adds context, never a paraphrase.
+- **Fail fast with the real cause.** An error helps only if it names what actually went wrong. A runtime error reaches the model carrying the runtime's own message, with the host's context added, never a paraphrase; a malformed file or value is reported as malformed, never as a different cause.
 
 ## Comments
 
