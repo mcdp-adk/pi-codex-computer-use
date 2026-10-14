@@ -10,6 +10,8 @@
 #   2. Once it is squash-merged, tag its merged commit and push the tag:
 #      git fetch && git tag v<version> "$(gh pr view <pr> --json mergeCommit --jq .mergeCommit.oid)"
 #      git push origin v<version>
+#   3. The release is out once npm serves it, a few minutes after the run
+#      succeeds: `npm view @mcdp-adk/pi-codex-computer-use versions` lists it.
 name: publish
 
 on:
