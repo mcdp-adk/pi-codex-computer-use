@@ -10,7 +10,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import type { TomlTable } from 'smol-toml';
 
 // The sky API reference sits next to the REPL module, under @oai/sky/docs in
 // one of the node_modules directories the REPL resolves packages from.
@@ -37,6 +36,13 @@ function asRecord(value: unknown, what: string): Record<string, unknown> {
     throw new Error(`${what} is malformed (expected an object)`);
   }
   return value;
+}
+
+// The node_repl server entry's known fields, narrowed once at the parse
+// boundary so a misspelt field is a type error.
+interface NodeReplEntry {
+  command?: unknown;
+  env?: unknown;
 }
 
 // Codex's configuration file: CODEX_HOME env or ~/.codex/config.toml.
@@ -71,14 +77,14 @@ export interface InstallationMissing {
 export function locateInstallation(): InstallationFound | InstallationMissing {
   const file = configPath();
   if (!fs.existsSync(file)) return { ok: false, missing: ['Codex config file (config.toml)'] };
-  let doc: TomlTable;
+  let doc: unknown;
   try {
     doc = parseToml(fs.readFileSync(file, 'utf8'));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, missing: [`Codex config file could not be parsed (${message})`] };
   }
-  const servers: unknown = doc.mcp_servers;
+  const servers: unknown = isRecord(doc) ? doc['mcp_servers'] : undefined;
   if (servers !== undefined && (!isRecord(servers) || Array.isArray(servers))) {
     return { ok: false, missing: ['Codex config file is malformed ([mcp_servers] should be a table)'] };
   }
@@ -86,14 +92,14 @@ export function locateInstallation(): InstallationFound | InstallationMissing {
   if (nodeRepl !== undefined && (!isRecord(nodeRepl) || Array.isArray(nodeRepl))) {
     return { ok: false, missing: ['Codex config file is malformed ([mcp_servers.node_repl] should be a table)'] };
   }
-  const entry: Record<string, unknown> = isRecord(nodeRepl) ? nodeRepl : {};
-  const command: unknown = entry['command'];
+  const entry: NodeReplEntry = isRecord(nodeRepl) ? { command: nodeRepl['command'], env: nodeRepl['env'] } : {};
+  const command: unknown = entry.command;
   if (!command) return { ok: false, missing: ['[mcp_servers.node_repl] command in Codex config'] };
   if (typeof command !== 'string' || !fs.existsSync(command)) {
     return { ok: false, missing: [`node_repl command (${String(command)} not found)`] };
   }
 
-  const envValue: unknown = entry['env'];
+  const envValue: unknown = entry.env;
   if (envValue !== undefined && (!isRecord(envValue) || Array.isArray(envValue))) {
     return { ok: false, missing: ['Codex config file is malformed ([mcp_servers.node_repl] env should be a table)'] };
   }
@@ -222,7 +228,7 @@ function manifestEntryPath(pkg: unknown): string {
 
 // A plugin document (guidance.md, confirmations.md) under the bundled
 // computer-use plugin of the marketplaces recorded in the parsed config.
-function pluginDocPath(name: string, doc: TomlTable): string | null {
+function pluginDocPath(name: string, doc: unknown): string | null {
   for (const root of marketplaceRoots(doc)) {
     const p = path.join(root, PLUGIN_DOCS, name);
     if (fs.existsSync(p)) return p;
@@ -234,8 +240,8 @@ function pluginDocPath(name: string, doc: TomlTable): string | null {
 // (e.g. the bundled marketplace the computer-use plugin ships in).
 // `[marketplaces.<name>] source = ...` (the real config's shape) and a bare
 // `[marketplace] source = ...` are both accepted.
-function marketplaceRoots(doc: TomlTable): string[] {
-  const candidates: unknown[] = [doc?.marketplaces, doc?.marketplace];
+function marketplaceRoots(doc: unknown): string[] {
+  const candidates: unknown[] = isRecord(doc) ? [doc['marketplaces'], doc['marketplace']] : [];
   const tables: Record<string, unknown>[] = candidates.filter(
     (t: unknown): t is Record<string, unknown> => isRecord(t),
   );

@@ -51,6 +51,14 @@ if (!globalThis.sky) {
 }
 `;
 
+// The `js` tool's arguments as this host sends them: the cell, plus the
+// cell's own timeout when asked for one. Named fields, so a misspelt key
+// (`timeoutMs`) is a type error rather than a silent `undefined`.
+interface JsToolArguments {
+  code: string;
+  timeout_ms?: number;
+}
+
 // The tools/call params of one cell: the cell plus, when the cell asks for
 // its own timeout, `timeout_ms`, plus the run's turn metadata when one is
 // active. An index signature, so the params pass as the MCP client's
@@ -58,7 +66,7 @@ if (!globalThis.sky) {
 interface CellParams {
   [key: string]: unknown;
   name: string;
-  arguments: Record<string, unknown>;
+  arguments: JsToolArguments;
   _meta?: Record<string, unknown>;
 }
 
@@ -204,7 +212,7 @@ export class ComputerUse {
   // The tools/call params of one cell. `timeout_ms` when the cell asks for
   // its own timeout; the run's turn metadata when one is active.
   #cellParams(code: string, { timeoutMs }: { timeoutMs?: number } = {}): CellParams {
-    const arguments_: Record<string, unknown> = { code };
+    const arguments_: JsToolArguments = { code };
     if (timeoutMs != null) arguments_.timeout_ms = timeoutMs;
     return {
       name: 'js',
