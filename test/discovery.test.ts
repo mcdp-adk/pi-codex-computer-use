@@ -17,8 +17,9 @@ import {
   withRealRuntime,
   toolResults,
   toolContentTexts,
-} from './harness.js';
-import { SettingsManager, DefaultPackageManager, DefaultResourceLoader } from '@earendil-works/pi-coding-agent';
+  isRecord,
+} from './harness.ts';
+import { SettingsManager, DefaultResourceLoader } from '@earendil-works/pi-coding-agent';
 
 // Builds a CODEX_HOME shape on disk. `parts` toggles which pieces exist:
 // config, replEntry (exe + config entry + sky package + sky API ref doc),
@@ -28,9 +29,17 @@ import { SettingsManager, DefaultPackageManager, DefaultResourceLoader } from '@
 // mainOnlyEntry (the manifest names its entry through both main and a
 // bare-string exports pointing at different files, and only the file main
 // names is on disk).
-// The process-exit hook in test/harness.js removes the directory; every test
+// The process-exit hook in test/harness.ts removes the directory; every test
 // creates its directories only through makeTempRoot.
-function fakeCodexHome(label, parts = {}) {
+function fakeCodexHome(label: string, parts: {
+  config?: boolean;
+  replEntry?: boolean;
+  commandFile?: boolean;
+  skyPkg?: boolean;
+  mainOnlyEntry?: boolean;
+  skyEntry?: boolean;
+  marketplace?: boolean;
+} = {}): string {
   const home = makeTempRoot(`codex-home-${label}`);
   const command = path.join(home, 'bin', 'node_repl.exe');
   const nm = path.join(home, 'bin', 'node_modules');
@@ -82,24 +91,29 @@ function fakeCodexHome(label, parts = {}) {
 
 describe('skill registration: the pi manifest ships the codex-computer-use skill', () => {
   it('the package pi manifest declares the skill directory', () => {
-    const manifest = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '..', 'package.json'), 'utf8'));
-    assert.ok(Array.isArray(manifest.pi?.skills), 'pi manifest must declare skills: [...]');
-    assert.ok(manifest.pi.skills.length >= 1, 'at least one skill entry');
-    for (const entry of manifest.pi.skills) {
-      const p = path.resolve(import.meta.dirname, '..', entry, 'SKILL.md');
-      assert.ok(fs.existsSync(p), `skill entry ${entry} has a SKILL.md`);
+    const repoRoot = path.resolve(import.meta.dirname, '..');
+    const manifest: unknown = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+    assert.ok(
+      isRecord(manifest) && isRecord(manifest['pi']) && Array.isArray(manifest['pi']['skills']),
+      'pi manifest must declare skills: [...]',
+    );
+    const skills: unknown[] = manifest['pi']['skills'];
+    assert.ok(skills.length >= 1, 'at least one skill entry');
+    for (const entry of skills) {
+      assert.ok(
+        typeof entry === 'string' && fs.existsSync(path.resolve(repoRoot, entry, 'SKILL.md')),
+        `skill entry ${String(entry)} has a SKILL.md`,
+      );
     }
   });
 
   it('discovery: pi packagemanager/resourceLoader discover the skill', async () => {
     const repoRoot = path.resolve(import.meta.dirname, '..');
     const settingsManager = SettingsManager.inMemory({ packages: [repoRoot] });
-    const packageManager = new DefaultPackageManager({ cwd: repoRoot, agentDir: repoRoot, settingsManager, builtinExtensions: [] });
     const loader = new DefaultResourceLoader({
       cwd: repoRoot,
       agentDir: repoRoot,
       settingsManager,
-      packageManager,
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
@@ -251,7 +265,8 @@ describe('completeness discovery: tools only exist when the Codex installation i
     // Complete on disk; the scripts hold no tool call, so no REPL launches —
     // registration and the description come from discovery alone.
     const prev = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = fakeCodexHome('complete', { replEntry: true, marketplace: true });
+    const home = fakeCodexHome('complete', { replEntry: true, marketplace: true });
+    process.env.CODEX_HOME = home;
     const cwd = makeTempRoot('pi-cua-complete-nolaunch');
     try {
       const { session } = await createScriptedSessionFromPackage({
@@ -267,12 +282,13 @@ describe('completeness discovery: tools only exist when the Codex installation i
           'a complete installation registers exactly the two computer-use tools',
         );
         const computerUse = session.getAllTools().find((t) => t.name === 'computer_use');
+        assert.ok(computerUse, 'computer_use is registered on a complete installation');
         const d = computerUse.description;
         assert.match(d, /codex-computer-use/, 'description must tell the model to load the skill');
         assert.match(d, /computer_use_guidance_path/, 'description must name the guidance document');
         assert.match(d, /computer_use_confirmations_path/, 'description must name the confirmation policy');
         assert.match(d, /computer_use_sky_api_path/, 'description must name the sky API reference');
-        const skyDoc = path.join(process.env.CODEX_HOME, 'bin', 'node_modules', '@oai', 'sky', 'docs', 'sky-window2-api.md');
+        const skyDoc = path.join(home, 'bin', 'node_modules', '@oai', 'sky', 'docs', 'sky-window2-api.md');
         assert.ok(d.includes(skyDoc), `description names the fake home's sky reference ${skyDoc}`);
         assert.ok(d.includes('guidance.md'), 'description names the guidance document');
         assert.ok(d.includes('confirmations.md'), 'description names the confirmation policy');
@@ -291,11 +307,12 @@ describe('completeness discovery: tools only exist when the Codex installation i
       // directory, which the real config names via NODE_REPL_TRUSTED_CODE_PATHS;
       // a migrated home carries the real env, so copy it too.
       const real = realCodexInstallation();
+      if ('missing' in real) throw new Error(`needs a real Codex runtime: ${real.missing}`);
       const cwdHome = fakeCodexHome('valid', { replEntry: true, marketplace: true });
       const prev = process.env.CODEX_HOME;
-      const nm = String(real.env.NODE_REPL_NODE_MODULE_DIRS).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
+      const nm = String(real.env['NODE_REPL_NODE_MODULE_DIRS']).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
       const command = String(real.command).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
-      const tcp = String(real.env.NODE_REPL_TRUSTED_CODE_PATHS).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
+      const tcp = String(real.env['NODE_REPL_TRUSTED_CODE_PATHS']).replace(/'/g, String.fromCharCode(92) + String.fromCharCode(39));
       const cfgToml = fs.readFileSync(path.join(cwdHome, 'config.toml'), 'utf8');
       fs.writeFileSync(path.join(cwdHome, 'config.toml'), cfgToml
         .replace(/command = '.*'/, `command = '${command}'`)
@@ -329,10 +346,13 @@ describe('completeness discovery: tools only exist when the Codex installation i
           // The runtime may echo non-JSON lines before the cell's write; take
           // the last line that looks like the meta object.
           const jsonLine = text.split('\n').filter((l) => l.trim().startsWith('{')).pop();
-          const meta = jsonLine ? JSON.parse(jsonLine)['x-codex-turn-metadata'] : undefined;
+          const metaBody: unknown = jsonLine ? JSON.parse(jsonLine) : undefined;
+          const meta: unknown = isRecord(metaBody) ? metaBody['x-codex-turn-metadata'] : undefined;
           assert.ok(meta, `second cell carried no turn metadata: ${text.slice(0, 200)}`);
-          assert.ok(meta.turn_id, 'cell carries a per-run turn id');
-          assert.equal(meta.session_id, session.sessionManager.getSessionId(), 'session_id is pi session id');
+          const metaTurnId: unknown = isRecord(meta) ? meta['turn_id'] : undefined;
+          const metaSessionId: unknown = isRecord(meta) ? meta['session_id'] : undefined;
+          assert.ok(metaTurnId, 'cell carries a per-run turn id');
+          assert.equal(metaSessionId, session.sessionManager.getSessionId(), 'session_id is pi session id');
         } finally {
           await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
           session.dispose();

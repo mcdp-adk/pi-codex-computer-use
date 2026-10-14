@@ -20,26 +20,26 @@ import {
   toolContentTexts,
   toolContentImages,
   lastJsonObject,
-} from './harness.js';
+} from './harness.ts';
 
 // The test process opens a window of its own, so the claim does not depend
 // on the developer's desktop: an HTA in its own mshta process, titled with a
 // token only this run generated. sky lists it (it does not list a WinForms
 // form shown by powershell), and killing that one process closes it.
-function openOwnWindow(root) {
+function openOwnWindow(root: string): { title: string; pid: number | undefined } {
   const title = 'PI16' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const hta = path.join(root, title + '.hta');
   fs.writeFileSync(hta, `<html><head><title>${title}</title><hta:application border="thin" /></head><body>computer-use screenshot test</body></html>`);
   return { title, pid: spawn('mshta.exe', [hta], { stdio: 'ignore' }).pid };
 }
 
-async function closeOwnWindow(pid) {
+async function closeOwnWindow(pid: number | undefined): Promise<void> {
   await killTree(pid);
   await waitUntil(() => !procSnapshot().some((p) => p.ProcessId === pid), 10000);
 }
 
 // The cell waits for the test's window to be listed, then captures it.
-const screenshotCell = (title) => `
+const screenshotCell = (title: string): string => `
 let window = null;
 for (let i = 0; i < 30 && !window; i++) {
   window = (await sky.list_windows()).find((w) => w.title === '${title}') ?? null;
@@ -52,7 +52,7 @@ nodeRepl.write(JSON.stringify({ window: window.title, screenshots: state.screens
 
 withRealRuntime('run a cell in the Codex REPL from pi', () => {
   // One directory for the whole suite, removed with every other test
-  // directory when the test process exits (test/harness.js).
+  // directory when the test process exits (test/harness.ts).
   const root = makeTempRoot();
 
   it('criterion 1: scripted list-apps cell returns apps as text', async () => {
@@ -96,11 +96,12 @@ withRealRuntime('run a cell in the Codex REPL from pi', () => {
         assert.ok(!results[0].isError, `cell failed: ${toolContentTexts(results[0]).slice(0, 200)}`);
         const observed = lastJsonObject(toolContentTexts(results[0]));
         assert.equal(
-          observed.window,
+          observed['window'],
           own.title,
           `cell did not capture the opened window: ${JSON.stringify(observed)}`,
         );
-        assert.ok(observed.screenshots >= 1, `no screenshot of the opened window: ${JSON.stringify(observed)}`);
+        const screenshots: unknown = observed['screenshots'];
+        assert.ok(Number(screenshots) >= 1, `no screenshot of the opened window: ${JSON.stringify(observed)}`);
         const images = toolContentImages(results[0]);
         assert.ok(images.length >= 1, `expected >=1 image in tool result, got ${images.length} (${toolContentTexts(results[0]).slice(0, 200)})`);
         assert.match(images[0].mimeType, /^image\//);
@@ -185,8 +186,8 @@ withRealRuntime('run a cell in the Codex REPL from pi', () => {
       // Every descendant of the spawned REPL, whatever its name: walk the
       // parent->child edges of the full snapshot. Name-matching alone misses
       // helpers the runtime spawns under other names.
-      const tree = new Set();
-      const walk = (pid) => {
+      const tree = new Set<number>();
+      const walk = (pid: number): void => {
         if (tree.has(pid)) return;
         tree.add(pid);
         for (const child of procsNow.filter((p) => p.ParentProcessId === pid)) walk(child.ProcessId);
@@ -207,6 +208,7 @@ withRealRuntime('run a cell in the Codex REPL from pi', () => {
   it('criterion 6: REPL session runs a cell with the config untouched and the routing variables deleted', async () => {
     // The harness parsed the config path without the package's code.
     const real = realCodexInstallation();
+    if ('missing' in real) throw new Error(`needs a real Codex runtime: ${real.missing}`);
     const configPath = real.file;
     const before = fs.readFileSync(configPath);
     // Plant the three app-routing variables with deliberately bogus values in
@@ -236,15 +238,18 @@ withRealRuntime('run a cell in the Codex REPL from pi', () => {
       assert.ok(!results[0]?.isError, `cell failed: ${toolContentTexts(results[0])}`);
       const observed = lastJsonObject(toolContentTexts(results[0]));
       // Temp directory pointed at the host's writable tmp dir (observable).
+      // The cell always writes tmpDir, so a non-string here fails the
+      // comparison below instead of throwing out of path.resolve.
+      const tmpDir: unknown = observed['tmpDir'];
       assert.equal(
-        path.resolve(observed.tmpDir),
+        typeof tmpDir === 'string' ? path.resolve(tmpDir) : tmpDir,
         path.resolve(expectedTmpDir),
-        `cell observed tmpDir ${observed.tmpDir}, expected the host tmp dir ${expectedTmpDir}`,
+        `cell observed tmpDir ${String(observed['tmpDir'])}, expected the host tmp dir ${expectedTmpDir}`,
       );
       // Routing variables deleted: with them kept (bogus pipe, bogus cli path)
       // the call fails — success is the observable witness of their deletion.
       assert.ok(
-        Array.isArray(observed.apps) && observed.apps.length > 0,
+        Array.isArray(observed['apps']) && observed['apps'].length > 0,
         'list_apps under planted bogus routing variables returned no apps',
       );
     } finally {
@@ -263,7 +268,7 @@ withRealRuntime('run a cell in the Codex REPL from pi', () => {
     const files = fs.readdirSync(hostDir).filter((f) => f.endsWith('.ts') && f !== 'extension.ts');
     assert.ok(files.length > 0, `expected host files in ${hostDir}, found none — the pi-agnostic check must never run empty`);
     const needle = '@earendil-works/pi-coding-agent';
-    const offenders = [];
+    const offenders: string[] = [];
     for (const f of files) {
       const src = fs.readFileSync(path.join(hostDir, f), 'utf8');
       if (src.includes(needle) || src.includes('pi-coding-agent')) {

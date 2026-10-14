@@ -35,4 +35,4 @@ The tools are not registered (with a single notice naming what is missing) until
 npm test
 ```
 
-`test/computer-use.test.js` and `test/reset-abort.test.js` run against the real Codex runtime and require a signed Codex installation; they skip cleanly when one is not present.
+`test/computer-use.test.ts` and `test/reset-abort.test.ts` run against the real Codex runtime and require a signed Codex installation; they skip cleanly when one is not present.
