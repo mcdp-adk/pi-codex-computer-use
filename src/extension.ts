@@ -2,11 +2,23 @@
 // computer_use_reset) against the Codex REPL, and reacts to pi's session
 // lifecycle. This file is pi's entry point; src/ carries the host logic and
 // never imports pi.
-import { ComputerUse } from './computer-use.mjs';
-import { locateInstallation } from './installation.mjs';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { Type } from 'typebox';
+import { ComputerUse } from './computer-use.ts';
+import { locateInstallation, type InstallationFound } from './installation.ts';
+
+// The tool parameters are typed from their schema, so a misspelt parameter
+// name is a type error. `Type` is pi's own TypeBox copy: pi's loader maps
+// the bare "typebox" specifier for extensions (loader.js getAliases,
+// virtual-modules.js VIRTUAL_MODULES), declared here as a peer so installs
+// stay as small as today.
+const computerUseParameters = Type.Object({
+  code: Type.String({ description: 'JavaScript to run in the REPL' }),
+  timeout_ms: Type.Optional(Type.Number({ description: 'Cell timeout in ms (optional, defaults to the runtime’s own)' })),
+});
 
 /** @public pi calls this factory, named in package.json "pi.extensions". */
-export default function (pi) {
+export default function (pi: ExtensionAPI): void {
   const computerUse = new ComputerUse();
 
   // The installation is looked up once at factory time: it decides whether
@@ -53,7 +65,7 @@ export default function (pi) {
 // The two model-facing tools, registered only when the installation lookup
 // found a complete installation. The computer_use description names the
 // located guidance files, so the model reads the real Codex documents.
-function registerTools(pi, { computerUse, installation }) {
+function registerTools(pi: ExtensionAPI, { computerUse, installation }: { computerUse: ComputerUse; installation: InstallationFound }): void {
   const guidanceBlurb = ` Codex guidance: operating rules \`${installation.guidancePath}\` (computer_use_guidance_path), confirmation policy \`${installation.confirmationPolicyPath}\` (computer_use_confirmations_path), sky API reference \`${installation.skyReferencePath}\` (computer_use_sky_api_path).`;
 
   pi.registerTool({
@@ -61,14 +73,7 @@ function registerTools(pi, { computerUse, installation }) {
     label: 'Computer use',
     description:
       'Run a JavaScript cell in the Codex computer-use REPL, whose sky API observes and operates Windows desktop apps. Returns what the cell produces: text passed to nodeRepl.write as text, and images passed to nodeRepl.emitImage as images. Cell semantics: top-level await works, bindings and values on globalThis persist across cells, only dynamic imports are available, and there is no `process`. The runtime applies its own default timeout; pass timeout_ms to override it for a slow cell. sky is already initialised. Before the first cell, load the codex-computer-use skill and read the Codex guidance below.' + guidanceBlurb,
-    parameters: {
-      type: 'object',
-      properties: {
-        code: { type: 'string', description: 'JavaScript to run in the REPL' },
-        timeout_ms: { type: 'number', description: 'Cell timeout in ms (optional, defaults to the runtime’s own)' },
-      },
-      required: ['code'],
-    },
+    parameters: computerUseParameters,
     // The model drives the desktop; each tool is model-only (not callable from
     // other tools), and cells run sequentially — one against the desktop at a time.
     exposure: 'model-only',
@@ -90,7 +95,7 @@ function registerTools(pi, { computerUse, installation }) {
     name: 'computer_use_reset',
     label: 'Computer use: reset',
     description: 'Reset the Codex computer-use REPL. Drops every binding and value on globalThis; the next computer_use cell runs in a fresh REPL with sky initialised again, and its result notes the reset.',
-    parameters: { type: 'object', properties: {} },
+    parameters: Type.Object({}),
     exposure: 'model-only',
     executionMode: 'sequential',
     execute: async () => {
@@ -105,7 +110,7 @@ function registerTools(pi, { computerUse, installation }) {
 }
 
 // The notice names exactly what is missing from the Codex installation.
-function missingNotice(missing) {
+function missingNotice(missing: string[]): string {
   const list = missing.map((m) => `  - ${m}`).join('\n');
   return [
     'codex-computer-use: Codex installation is incomplete, computer-use tools are unavailable.',
@@ -114,7 +119,7 @@ function missingNotice(missing) {
   ].join('\n');
 }
 
-function errorResult(toolName, err) {
+function errorResult(toolName: string, err: unknown): { content: [{ type: 'text'; text: string }]; details: undefined; isError: boolean } {
   const message = err instanceof Error ? err.message : String(err);
   return {
     content: [{ type: 'text', text: `${toolName} failed: ${message}` }],

@@ -5,8 +5,12 @@ How code in this repo is written, for whoever writes or reviews it. Collaboratio
 ## Design
 
 - **Decisions and terms.** Code follows the decisions in `docs/adr/` and the terms in `GLOSSARY.md`. A change that departs from one updates it in the same PR.
-- **Host logic stays pi-agnostic.** Only `src/extension.mjs` imports the pi agent; the rest of `src/` could serve a different host. *checked: `npm test`*
+- **Host logic stays pi-agnostic.** Only `src/extension.ts` imports the pi agent; the rest of `src/` could serve a different host. *checked: `npm test`*
 - **Every part has a production caller.** Parameters, options, exports, globals, and return values exist because production uses them; nothing is added only so a test can reach inside. *checked for exports and files: `npm run lint`*
+- **TypeScript without a build.** `src/` is TypeScript, checked by the compiler in `npm run lint`; pi loads the `.ts` source directly, so nothing is compiled or emitted. *checked: `npm run lint`*
+- **Erasable syntax only.** No enums, namespaces, or parameter properties — only syntax Node and pi's loader can strip unchanged. *checked: `npm run lint`*
+- **Relative imports name the `.ts` file.** `./computer-use.ts`, never the extensionless path.
+- **No `any` without a comment saying why.** Parsed JSON and TOML arrive as `unknown` and are narrowed before use; caught errors are `unknown`.
 - **Fail fast with the real cause.** A runtime error reaches the model as a tool error carrying the runtime's own message; the host adds context, never a paraphrase.
 
 ## Comments

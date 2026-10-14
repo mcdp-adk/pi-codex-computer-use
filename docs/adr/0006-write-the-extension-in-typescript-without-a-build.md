@@ -1,0 +1,8 @@
+# Write the extension in TypeScript without a build
+
+The three extension modules are TypeScript, checked by the TypeScript compiler in `npm run lint`, with no build step: pi loads the `.ts` entry point directly through its jiti loader, and the published package ships the `.ts` source. Agents write most of this code and the owner reviews little of it line by line, so a type error that fails in seconds — a misspelt tool parameter, a wrong shape passed to pi or to the MCP client, an unchecked field of parsed JSON or TOML — is worth more here than in a hand-written codebase. The tool parameters are typed from their TypeBox schema through pi's own TypeBox copy, which pi's loader maps for extensions; it is declared as a peer, so installs stay as small as today. Only erasable syntax is allowed, so the source Node and pi's loader run is exactly the source in the repo.
+
+## Considered Options
+
+- JavaScript with JSDoc annotations checked through `checkJs`: keeps the `.mjs` files but proves less — parsed TOML and caught errors stay weakly typed, the annotations rot separately from the code they describe, and nothing stops non-strippable syntax from reaching the loader.
+- Compiling to JavaScript before publishing: the code pi runs would differ from the source in the repo, every release would depend on a build step staying in sync, and debugging an installed package would mean reading generated files.
