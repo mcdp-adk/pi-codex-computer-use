@@ -46,7 +46,7 @@ Verified against the Codex runtime `cua_node/cfb32733c877621e` and the bundled `
 
 ## sky and the helper
 
-- Browser windows fail `get_window_state` with "could not determine the current browser URL on Windows with enough confidence to enforce policy". *probe*
+- Browser windows fail `get_window_state` with "Computer Use has been stopped for this turn because it could not determine the current browser URL on Windows with enough confidence to enforce policy". *probe; manual, an Edge window (`app` `MSEdge`) failed this way in two turns*
 - A minimized window fails `get_window_state` with "window is minimized; call activate_window, refresh with get_window, then retry get_window_state". *probe*
 - `click`/`scroll` take window-relative `x`/`y` in the pixel space of the screenshot `get_window_state` returned, also at 150% display scaling. *manual, [#4](https://github.com/mcdp-adk/pi-codex-computer-use/issues/4)*
 - Some apps expose no accessibility tree (Unigram returned an empty tree), leaving coordinates as the only way to act. *manual*
