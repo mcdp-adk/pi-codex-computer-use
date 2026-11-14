@@ -228,6 +228,34 @@ describe('completeness discovery: tools only exist when the Codex installation i
     }
   });
 
+  it('a missing configured command reports the path and how to refresh Codex configuration', async () => {
+    const prev = process.env.CODEX_HOME;
+    const home = fakeCodexHome('stale-command', { replEntry: true, commandFile: false, marketplace: true });
+    process.env.CODEX_HOME = home;
+    try {
+      const { session } = await createScriptedSessionFromPackage({
+        cwd: makeTempRoot('pi-cua-stale-command'),
+        scripts: [],
+      });
+      try {
+        assert.ok(!session.getAllTools().some((t) => t.name.startsWith('computer_use')));
+        assert.equal(session.notifications.length, 1);
+        const notice = session.notifications[0].message;
+        assert.ok(notice.includes(path.join(home, 'bin', 'node_repl.exe')));
+        assert.match(notice, /not found/);
+        assert.match(notice, /if Codex (?:was |has )?updated/i);
+        assert.match(notice, /open the Codex desktop app/i);
+        assert.match(notice, /refresh config\.toml/i);
+        assert.match(notice, /new pi session/i);
+      } finally {
+        await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
+        session.dispose();
+      }
+    } finally {
+      if (prev === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prev;
+    }
+  });
+
   it('missing guidance through a package session: no tools registered and one ui notice names the guidance', async () => {
     const prev = process.env.CODEX_HOME;
     process.env.CODEX_HOME = fakeCodexHome('no-guidance', { replEntry: true, marketplace: false });

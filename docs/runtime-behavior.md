@@ -34,6 +34,10 @@ Verified against the Codex runtime `cua_node/cfb32733c877621e` and the bundled `
 - An uncaught error in a cell does not end the session: later cells keep running against the same REPL, with sky still initialised. *test: reset-notice*
 - `nodeRepl.env` shows only the variables in `NODE_REPL_UNTRUSTED_ENV_ALLOWLIST`, so a cell cannot read its launch environment. `nodeRepl.tmpDir` follows `TMP`/`TEMP`. *test: computer-use, criterion 6*
 
+## Installation configuration
+
+- After a Windows Store update, Codex's `config.toml` was observed still naming a runtime executable that was no longer present; opening the updated Codex desktop app refreshed the configured paths in that case. *probe, 2026-11-14: AppX deployment events showed an update from `26.1103.7773.0` to `26.1111.2228.0`; the old configured executable was absent before Codex launched, and the config named the existing new executable afterward. This establishes the recovery for that update, not that every missing executable is caused by an update.*
+
 ## Launch environment
 
 - The REPL needs `NODE_REPL_TRUSTED_CODE_PATHS` from Codex's configuration to trust `@oai/sky/service`; without it, sky fails with "Trusted RPC package must resolve within a configured trusted module directory". *probe*
