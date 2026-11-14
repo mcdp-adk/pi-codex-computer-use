@@ -79,7 +79,7 @@ withRealRuntime('guide the model with the skill and Codex guidance', () => {
     const computerUse = toolsSnapshot.find((t) => t.name === 'computer_use');
     assert.ok(computerUse, 'computer_use is registered');
     const d = computerUse.description;
-    const paths = d.match(/[A-Za-z]:\\[^`\s]+/g) ?? [];
+    const paths = [...d.matchAll(/`([A-Za-z]:\\[^`]+)`/g)].map((match) => match[1]);
     assert.ok(paths.length >= 3, `description names no discoverable paths: ${d.slice(-400)}`);
     for (const p of paths) {
       assert.ok(fs.existsSync(p), `named path ${p} exists`);

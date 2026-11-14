@@ -96,7 +96,7 @@ export function locateInstallation(): InstallationFound | InstallationMissing {
   const command: unknown = entry.command;
   if (!command) return { ok: false, missing: ['[mcp_servers.node_repl] command in Codex config'] };
   if (typeof command !== 'string' || !fs.existsSync(command)) {
-    return { ok: false, missing: [`node_repl command (${String(command)} not found)`] };
+    return { ok: false, missing: [`node_repl command (${String(command)} not found). If Codex updated, open the Codex desktop app to refresh config.toml, then start a new pi session.`] };
   }
 
   const envValue: unknown = entry.env;
